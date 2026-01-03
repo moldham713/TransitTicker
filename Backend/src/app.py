@@ -4,17 +4,19 @@ import schedule
 
 app = Flask(__name__)
 
+transit_data = {}
+
 @app.route('/', methods=['GET'])
 def home():
-    username = request.args.get('line')
+    # username = request.args.get('line')
 
     return jsonify({'data': 'hello world'})
 
 if __name__ == '__main__':
-    refresh_transit_data()
+    refresh_transit_data(data=transit_data)
 
     # Every hour, run the repository refresh script to update transit data.
-    schedule.every().hour.do(refresh_transit_data)
+    schedule.every().hour.do(refresh_transit_data, data=transit_data)
 
     # Run the Flask app
     app.run(debug=True)
