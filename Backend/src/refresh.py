@@ -1,15 +1,14 @@
 import requests
 import zipfile
 import csv
+import os
+from datetime import datetime
 
 # Every hour, this script fetches the latest transit data from MTA's APIs and updates the local working directory.
 MTA_SUPP_GTFS_API_URL = 'https://rrgtfsfeeds.s3.amazonaws.com/gtfs_supplemented.zip'
 
 
 def refresh_transit_data(data : dict) -> None:
-    import requests
-    import os
-
     # Directory to store the fetched data
     data_directory = os.path.join(os.path.dirname(__file__), 'data')
 
@@ -34,8 +33,13 @@ def refresh_transit_data(data : dict) -> None:
         zip_ref.extractall(data_directory)
         print(f"Extracted GTFS data to '{data_directory}'")
 
+    # Load data into memory
+    load(data, data_directory)
+    optimize_transit_data(data)
+
+def load(data: dict, data_directory : str) -> None:
     # Load data into the provided dictionary
-    data["calendar_dates"] = {}
+    data["calendar_dates"] = {} # TODO: only load if matches today's date
     with open(os.path.join(data_directory, 'calendar_dates.txt'), 'r') as file:
         for line in csv.DictReader(file):
             key = line['service_id']
@@ -49,16 +53,14 @@ def refresh_transit_data(data : dict) -> None:
         for line in csv.DictReader(file):
             key = line['service_id']
             if key not in data["calendar"]:
-                data["calendar"][key] = {}
-            data["calendar"][key]['monday'] = line['monday']
-            data["calendar"][key]['tuesday'] = line['tuesday']
-            data["calendar"][key]['wednesday'] = line['wednesday']
-            data["calendar"][key]['thursday'] = line['thursday']
-            data["calendar"][key]['friday'] = line['friday']
-            data["calendar"][key]['saturday'] = line['saturday']
-            data["calendar"][key]['sunday'] = line['sunday']
-            data["calendar"][key]['start_date'] = line['start_date']
-            data["calendar"][key]['end_date'] = line['end_date']
+                data["calendar"][key] = [] # TODO: only load if matches today's weekday
+            data['calendar'][key].append('monday') if line['monday'] == '1' else None
+            data['calendar'][key].append('tuesday') if line['tuesday'] == '1' else None
+            data['calendar'][key].append('wednesday') if line['wednesday'] == '1' else None
+            data['calendar'][key].append('thursday') if line['thursday'] == '1' else None
+            data['calendar'][key].append('friday') if line['friday'] == '1' else None
+            data['calendar'][key].append('saturday') if line['saturday'] == '1' else None
+            data['calendar'][key].append('sunday') if line['sunday'] == '1' else None
     print("Loaded 'calendar' data into memory.")
 
     data["routes"] = []
@@ -83,9 +85,7 @@ def refresh_transit_data(data : dict) -> None:
             key = line['trip_id']
             if key not in data["stop_times"]:
                 data["stop_times"][key] = {}
-            data["stop_times"][key]['stop_id'] = line['stop_id']
-            data["stop_times"][key]['arrival_time'] = line['arrival_time']
-            data["stop_times"][key]['departure_time'] = line['departure_time']
+            data["stop_times"][key][line['stop_id']] = {'arrival_time' : line['arrival_time'], 'departure_time' : line['departure_time']}
     print("Loaded 'stop_times' data into memory.")
 
     data["trips"] = {}
@@ -99,3 +99,25 @@ def refresh_transit_data(data : dict) -> None:
                 'direction_id': line['direction_id'],
             }
     print("Loaded 'trips' data into memory.")
+
+
+
+def optimize_transit_data(data: dict) -> None:
+    # Identify services that are currently running
+    date = datetime.today().strftime('%Y%m%d')
+    weekday = datetime.today().strftime('%A').lower()
+
+    running_services = []
+    for service_id in data["calendar_dates"]:
+        if weekday in data["calendar_dates"][service_id]:
+            running_services.append(service_id)
+
+    for service_id in data["calendar_dates"]:
+        if date in data["calendar_dates"][service_id]:
+            if data["calendar_dates"][service_id][date] == '1':  # Added service
+                running_services.append(service_id)
+            elif data["calendar_dates"][service_id][date] == '2':  # Removed service
+                if service_id in running_services:
+                    running_services.remove(service_id)
+    
+    data['running_services'] = running_services
