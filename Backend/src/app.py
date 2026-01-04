@@ -11,9 +11,9 @@ transit_data = {}
 
 @app.route('/', methods=['GET'])
 def home():
-    # username = request.args.get('line')
-
-    # return jsonify({'data': 'hello world'})
+    route = request.args.get('route', 'Q')
+    stop = request.args.get('stop', 'Q05S')
+    direction = int(request.args.get('direction', 1))
     return json.dumps(get_next_departure_time("Q", "Q05S", 1, transit_data))
 
 if __name__ == '__main__':

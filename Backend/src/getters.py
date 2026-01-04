@@ -3,6 +3,19 @@
 import datetime
 
 def get_next_departure_time(route_id: str, stop_id: str, direction: int, data: dict) -> dict:
+    """
+    Get the next departure time for a transit vehicle at a specific stop.
+    Args:
+        route_id (str): The ID of the transit route.
+        stop_id (str): The ID of the transit stop.
+        direction (int): The direction of travel (0 uptown, 1 downtown).
+        data (dict): A dictionary containing transit data populated in refresh.py.
+        dict: A dictionary containing:
+            - 'next_departure_time' (str or None): The next departure time in 'HH:MM:SS' format, 
+              or None if no upcoming departure is found.
+            - 'minutes_away' (int or None): The number of minutes until the next departure, 
+              or None if no upcoming departure is found.
+    """
     print("Getting next arrival time for route:", route_id, "stop:", stop_id, "direction:", direction)
 
     current_time = datetime.datetime.now()
