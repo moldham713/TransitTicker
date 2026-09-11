@@ -5,9 +5,9 @@ VPC, one Application Load Balancer (frontend on port 80, backend API on port
 8080), one ECS cluster running both as Fargate services, one ECR repo per
 image, and an IAM role GitHub Actions assumes via OIDC to deploy.
 
-No NAT Gateway is used (tasks sit in public subnets with locked-down security
-groups instead) - that alone saves roughly $32/month, which would otherwise
-be the single biggest line item in this stack for a low-traffic project.
+No NAT Gateway is used - tasks sit in public subnets with locked-down
+security groups. This alone saves roughly $32/month, the single biggest
+potential line item in this stack for a low-traffic project.
 
 ## One-time setup
 
@@ -85,11 +85,11 @@ negligible. No NAT Gateway. Ballpark **$25-40/month** while both services are
 running continuously.
 
 To stop paying between demos without deleting anything: scale both services
-to zero rather than destroying the stack (keeps the same ALB DNS name for
-next time; the ALB itself still incurs its base hourly charge, just not the
-Fargate compute). Run this in AWS CloudShell (or anywhere with the AWS CLI
-configured) - it's an operational action, not an infrastructure change, so it
-deliberately isn't part of either GitHub Actions workflow:
+to zero. This keeps the same ALB DNS name for next time (the ALB itself
+still incurs its base hourly charge, just not the Fargate compute). Run this
+in AWS CloudShell (or anywhere with the AWS CLI configured) - it's an
+operational action, not an infrastructure change, so it deliberately isn't
+part of either GitHub Actions workflow:
 
 ```
 aws ecs update-service --cluster transitticker-cluster --service transitticker-backend  --desired-count 0

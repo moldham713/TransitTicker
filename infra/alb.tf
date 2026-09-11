@@ -1,9 +1,9 @@
-# One ALB serves both services on two different listener ports, rather than
-# provisioning a separate load balancer per service (each ALB costs ~$16-20/
-# month on its own, regardless of traffic). This mirrors the port-based split
-# already used locally in docker-compose.yml (backend :5000, frontend :5001),
-# just moved to :8080/:80 here since 80 is the conventional default for the
-# user-facing service.
+# One ALB serves both services, split across two listener ports (frontend on
+# 80, backend API on 8080) - each ALB costs ~$16-20/month on its own
+# regardless of traffic, so one shared ALB keeps that a single line item for
+# both services. This is the same port-based split docker-compose.yml uses
+# locally (backend :5000, frontend :5001); 80 is used here for the
+# user-facing service since it's the conventional default.
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "Allow inbound HTTP to the load balancer from the internet."
@@ -69,10 +69,9 @@ resource "aws_lb_target_group" "backend" {
   target_type = "ip"
 
   health_check {
-    # No dedicated /health endpoint exists yet (a previously flagged
-    # follow-up for the backend). "/" returns 200 once the app is up, but
-    # that's true even if the GTFS feed itself failed to load - it isn't a
-    # real readiness check, just a liveness one, until /health exists.
+    # The backend has no dedicated /health endpoint, so this checks "/".
+    # That returns 200 once Flask is up, even if the GTFS feed itself failed
+    # to load - a liveness check, not a true readiness check.
     path                = "/"
     healthy_threshold   = 2
     unhealthy_threshold = 5

@@ -5,7 +5,7 @@ import threading
 import time
 import os
 from refresh import refresh_transit_data
-from getters import get_next_departure_time, get_routes, get_stops_for_route
+from getters import get_next_departures, get_routes, get_stops_for_route
 
 
 app = Flask(__name__)
@@ -22,14 +22,26 @@ transit_data_lock = threading.Lock()
 @app.route('/', methods=['GET'])
 def home():
     route = request.args.get('route', 'Q')
-    stop = request.args.get('stop', 'Q05S')
+    # "Q05" is a parent station id, matching what get_stops_for_route returns
+    # for a dropdown - the shape getters.py's
+    # _station_key/_platform_belongs_to_station expect, and what the frontend
+    # actually sends. A bare platform id (e.g. "Q05S") also works via exact
+    # match.
+    stop = request.args.get('stop', 'Q05')
     try:
         direction = int(request.args.get('direction', 1))
     except ValueError:
         return jsonify({"error": "direction must be an integer (0 or 1)"}), 400
 
+    try:
+        count = int(request.args.get('count', 3))
+    except ValueError:
+        return jsonify({"error": "count must be an integer"}), 400
+    # Range clamping (not just "is this parseable") is get_next_departures'
+    # own responsibility, not this route's - see its docstring.
+
     with transit_data_lock:
-        result = get_next_departure_time(route, stop, direction, transit_data)
+        result = get_next_departures(route, stop, direction, transit_data, count=count)
     return jsonify(result)
 
 

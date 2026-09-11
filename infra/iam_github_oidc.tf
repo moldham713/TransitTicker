@@ -1,11 +1,11 @@
-# The GitHub OIDC identity provider itself is NOT managed here - it's created
-# once, out-of-band, by infra/bootstrap/bootstrap.sh. That script is also what
-# creates the broader "transitticker-terraform" role GitHub Actions uses to
-# run *this* Terraform config in the first place (a role Terraform obviously
-# can't create for itself before it has any AWS access at all). This file
-# only manages the narrower role the app-deploy workflow uses afterward, and
-# references the bootstrap-created OIDC provider by its well-known,
-# deterministic ARN rather than by resource reference.
+# The GitHub OIDC identity provider itself is not a Terraform resource in
+# this config - it's created once, out-of-band, by infra/bootstrap/bootstrap.sh.
+# That script also creates the broader "transitticker-terraform" role GitHub
+# Actions uses to run this Terraform config: Terraform can't create the role
+# it needs before it has any AWS access at all, so that role has to exist
+# first. This file manages only the narrower role the app-deploy workflow
+# uses afterward, addressing the bootstrap-created OIDC provider by its
+# well-known, deterministic ARN.
 data "aws_caller_identity" "current" {}
 
 locals {

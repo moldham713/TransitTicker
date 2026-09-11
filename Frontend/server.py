@@ -15,8 +15,8 @@ BACKEND_API_URL = os.environ.get('BACKEND_API_URL', 'http://localhost:5000')
 
 @app.route('/config.js')
 def config_js():
-    # Served as JS (not JSON) so index.html can just <script src="/config.js">
-    # it before the app code runs, instead of doing an extra fetch first.
+    # Served as JS (not JSON) so index.html can load it with a plain
+    # <script src="/config.js"> tag before the app code runs.
     return Response(f'window.BACKEND_API_URL = {BACKEND_API_URL!r};', mimetype='application/javascript')
 
 

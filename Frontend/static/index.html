@@ -46,33 +46,127 @@
     cursor: pointer;
   }
   button:disabled { background: #2a3852; cursor: not-allowed; }
-  .result {
+  .departures {
     margin-top: 20px;
-    padding: 18px;
     border-radius: 8px;
     background: #0e1626;
     border: 1px solid #223049;
-    text-align: center;
+    overflow: hidden;
   }
-  .result .big { font-size: 2.1rem; font-weight: 700; }
-  .result .label { color: #8b96a8; font-size: 0.8rem; margin-top: 4px; }
+  .departures .empty {
+    padding: 18px;
+    text-align: center;
+    color: #8b96a8;
+    font-size: 0.85rem;
+  }
+  .departure-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 12px 18px;
+  }
+  .departure-row + .departure-row {
+    border-top: 1px solid #223049;
+  }
+  .departure-row .minutes {
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+  /* Soonest departure (first row) reads like the headline number on a real
+     platform countdown clock; the rest are supporting detail below it. */
+  .departure-row:first-child {
+    padding: 16px 18px;
+  }
+  .departure-row:first-child .minutes {
+    font-size: 1.9rem;
+    color: #3b82f6;
+  }
+  .departure-row .time {
+    color: #8b96a8;
+    font-size: 0.8rem;
+  }
   .error {
     color: #f87171;
     font-size: 0.82rem;
     margin-top: 14px;
     line-height: 1.4;
   }
+  .boot-status {
+    color: #8b96a8;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+  .boot-status.boot-error {
+    color: #f87171;
+    text-align: left;
+    white-space: pre-wrap;
+    font-family: ui-monospace, monospace;
+    font-size: 0.75rem;
+  }
 </style>
 </head>
 <body>
-<div id="root"></div>
+<!-- Placeholder content, replaced once React actually mounts. If this is
+     still on screen - not the real UI, not an error box - with no red text
+     below, React never took over at all: check the browser console (F12)
+     for a CDN/network error the boot script below wasn't able to catch. -->
+<div id="root"><div class="boot-status">Loading TransitTicker...</div></div>
+
+<!-- Runs before anything else, and is plain JS (not type="text/babel") on
+     purpose: if Babel itself fails to load below, no text/babel script ever
+     runs - including any error handling written inside one. This is what
+     turns a silent blank page into a visible, specific error message when a
+     CDN script fails, and a generic "still not loaded" message after a
+     timeout for failure modes this doesn't catch directly. -->
+<script>
+(function () {
+  function showBootError(message) {
+    var root = document.getElementById('root');
+    if (!root) return;
+    root.innerHTML = '<div class="card"><h1>TransitTicker</h1>' +
+      '<div class="boot-status boot-error">Failed to start the page.\n\n' +
+      message +
+      '\n\nCheck the browser console (F12) for more detail.</div></div>';
+  }
+
+  window.addEventListener('error', function (e) {
+    // Capture-phase listener so this also catches <script src> load
+    // failures (bad CDN URL, network block, ad blocker), not just runtime
+    // exceptions - those don't bubble, but they are visible in the capture
+    // phase on window/document.
+    var target = e.target;
+    if (target && target.tagName === 'SCRIPT') {
+      showBootError('Failed to load a required script: ' + (target.src || '(inline script)'));
+    } else if (e.message) {
+      showBootError(e.message);
+    }
+  }, true);
+
+  // Backstop for anything the listener above doesn't catch (e.g. Babel
+  // loads fine but never finds/transforms the app script for some reason).
+  window.setTimeout(function () {
+    if (!window.__transitTickerMounted) {
+      showBootError('The page did not finish loading within 8 seconds.');
+    }
+  }, 8000);
+})();
+</script>
 
 <!-- Simple, no-build-step React setup: UMD builds + in-browser JSX transform.
      Fine for a small internal simulator UI; a real app would use a proper
-     bundler, but that's unnecessary complexity here. -->
+     bundler, but that's unnecessary complexity here.
+
+     @babel/standalone is pinned to an exact version (7.29.0, the last Babel 7
+     release - https://babeljs.io/blog/2026/01/31/7.29.0). An unversioned
+     unpkg URL for this package resolves to whichever release is currently
+     newest, and Babel 8's standalone build uses `import` syntax that is
+     incompatible with loading it as a plain, non-module <script> tag the way
+     this page does - see https://github.com/babel/babel/issues/18073.
+     Pinning keeps this page's behavior independent of Babel's release
+     schedule. -->
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
 
 <!-- Injected by the Flask server at runtime from the BACKEND_API_URL env var,
      so this image doesn't need to be rebuilt to point at a different backend. -->
@@ -138,11 +232,18 @@ function App() {
       .finally(() => setLoadingStops(false));
   }, [route]);
 
-  const fetchNextArrival = useCallback(() => {
+  const DEPARTURE_COUNT = 3; // matches a small embedded display's line count
+
+  const fetchDepartures = useCallback(() => {
     if (!route || !stop) return;
     setLoadingResult(true);
     setResult(null);
-    const params = new URLSearchParams({ route, stop, direction: String(direction) });
+    const params = new URLSearchParams({
+      route,
+      stop,
+      direction: String(direction),
+      count: String(DEPARTURE_COUNT),
+    });
     fetch(`${BACKEND_URL}/?${params.toString()}`)
       .then((res) => {
         if (!res.ok) throw new Error(`backend returned ${res.status}`);
@@ -152,7 +253,7 @@ function App() {
         setResult(data);
         setError(null);
       })
-      .catch((err) => setError(`Could not fetch next arrival: ${err.message}`))
+      .catch((err) => setError(`Could not fetch departures: ${err.message}`))
       .finally(() => setLoadingResult(false));
   }, [route, stop, direction]);
 
@@ -200,21 +301,23 @@ function App() {
         ))}
       </select>
 
-      <button onClick={fetchNextArrival} disabled={!route || !stop || loadingResult}>
-        {loadingResult ? "Checking..." : "Get Next Arrival"}
+      <button onClick={fetchDepartures} disabled={!route || !stop || loadingResult}>
+        {loadingResult ? "Checking..." : `Get Next ${DEPARTURE_COUNT} Departures`}
       </button>
 
       {error && <div className="error">{error}</div>}
 
       {result && (
-        <div className="result">
-          {result.next_departure_time ? (
-            <>
-              <div className="big">{result.minutes_away} min</div>
-              <div className="label">Next departure at {result.next_departure_time}</div>
-            </>
+        <div className="departures">
+          {result.departures && result.departures.length > 0 ? (
+            result.departures.map((d, i) => (
+              <div className="departure-row" key={i}>
+                <span className="minutes">{d.minutes_away} min</span>
+                <span className="time">{d.departure_time}</span>
+              </div>
+            ))
           ) : (
-            <div className="label">No upcoming departures found for this selection.</div>
+            <div className="empty">No upcoming departures found for this selection.</div>
           )}
         </div>
       )}
@@ -223,6 +326,7 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+window.__transitTickerMounted = true; // tells the boot-status timeout script above not to report a false failure
 </script>
 </body>
 </html>

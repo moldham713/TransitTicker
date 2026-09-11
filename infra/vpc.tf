@@ -22,14 +22,14 @@ resource "aws_internet_gateway" "main" {
 
 # Two public subnets in different AZs - the ALB requires at least two.
 #
-# Fargate tasks run in these same public subnets (with public IPs assigned
-# directly) rather than in private subnets behind a NAT Gateway. That's a
-# deliberate cost trade-off for a personal project: a NAT Gateway costs
-# roughly $32/month on its own - more than the rest of this entire stack
-# combined - just to let tasks reach the internet (for pulling the MTA GTFS
-# feed and images from ECR). Task-level exposure is still locked down by
-# aws_security_group.ecs_tasks in ecs.tf, which only accepts traffic from the
-# ALB's security group, not the open internet.
+# Fargate tasks run in these same public subnets, with public IPs assigned
+# directly (no NAT Gateway). This is a deliberate cost trade-off for a
+# personal project: a NAT Gateway costs roughly $32/month on its own - more
+# than the rest of this entire stack combined - just to let tasks reach the
+# internet (for pulling the MTA GTFS feed and images from ECR). Task-level
+# exposure is still locked down by aws_security_group.ecs_tasks in ecs.tf,
+# which only accepts traffic from the ALB's security group, not the open
+# internet.
 resource "aws_subnet" "public" {
   count                   = 2
   vpc_id                  = aws_vpc.main.id

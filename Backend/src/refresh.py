@@ -15,11 +15,11 @@ def refresh_transit_data(data: dict, lock: threading.Lock = None) -> bool:
     Download and parse the latest GTFS feed, then publish it into `data`.
 
     The download and parse happen against a fresh, private dict (`new_data`) so
-    that requests being served concurrently keep reading the old, complete
-    dataset for the entire (potentially slow) download/parse. Only the final
-    swap into the caller's `data` dict is guarded by `lock` (if provided), so
-    readers never observe a half-populated dataset, and the exclusive window
-    is just the swap itself rather than the whole refresh.
+    that requests being served concurrently keep reading the existing, complete
+    `data` dict for the entire (potentially slow) download/parse. Only the final
+    swap into `data` is guarded by `lock` (if provided), so readers never
+    observe a half-populated dataset; the exclusive window is limited to just
+    that swap.
 
     The whole attempt is wrapped in a try/except: a bad download, a corrupt
     zip, or a malformed CSV should not crash the caller. That matters most
@@ -57,7 +57,7 @@ def refresh_transit_data(data: dict, lock: threading.Lock = None) -> bool:
             print(f"Extracted GTFS data to '{data_directory}'")
 
         # Load and process the new data into a private dict first, so in-flight
-        # requests keep seeing the old (complete) `data` until the swap below.
+        # requests keep seeing the existing, complete `data` until the swap below.
         new_data = {}
         load(new_data, data_directory)
         optimize_transit_data(new_data)
@@ -115,6 +115,14 @@ def load(data: dict, data_directory : str) -> None:
             data["stops"][key] = {
                 'stop_code': line.get('stop_code', ''),
                 'stop_name': line['stop_name'],
+                # MTA subway stops.txt gives each physical station a separate
+                # platform-level stop_id per direction (e.g. "127N"/"127S"
+                # under parent station "127"). parent_station is what lets
+                # getters.py present one entry per physical station in the
+                # route/stop dropdowns. Blank/missing for stops that have no
+                # such parent (e.g. most bus stops), which getters.py falls
+                # back on.
+                'parent_station': line.get('parent_station', ''),
             }
     print("Loaded 'stops' data into memory.")
 
