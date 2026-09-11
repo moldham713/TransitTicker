@@ -38,11 +38,16 @@ def _platform_belongs_to_station(platform_stop_id: str, station_id: str, stops: 
     return platform_stop_id == station_id or _station_key(platform_stop_id, stops) == station_id
 
 
-def get_next_departures(route_id: str, stop_id: str, direction: int, data: dict, count: int = 3) -> dict:
+def get_next_departures(route_id: str, stop_id: str, direction: int, data: dict,
+                         realtime_data: dict = None, count: int = 3) -> dict:
     """
     Get the next several upcoming departures for a transit vehicle at a
     specific station - the kind of small departure board a real platform
-    display shows.
+    display shows. Each departure uses a live GTFS-Realtime prediction when
+    one is available for that trip, falling back to the static schedule
+    otherwise; typically only the next few departures per route/direction
+    have an active live prediction at all, which lines up well with only
+    ever returning a handful of departures in the first place.
 
     Args:
         route_id (str): The ID of the transit route.
@@ -56,7 +61,14 @@ def get_next_departures(route_id: str, stop_id: str, direction: int, data: dict,
             direction, so no hardcoded assumption about what a platform
             suffix means is needed.
         direction (int): The direction of travel (0 uptown, 1 downtown).
-        data (dict): A dictionary containing transit data populated in refresh.py.
+        data (dict): A dictionary containing static transit data populated in refresh.py.
+        realtime_data (dict): Live predictions populated by realtime.py, structured
+            as realtime_data[trip_id][stop_id] = predicted_departure_epoch (a Unix
+            timestamp). None or {} is fine - every trip then falls back to its
+            static scheduled time. datetime.fromtimestamp() converts an epoch
+            using the container's local timezone, matching how the static
+            schedule's naive local times are already handled here - both rely
+            on the container being set to America/New_York (see Backend/Dockerfile).
         count (int): Maximum number of upcoming departures to return. Clamped
             to [1, 10] here (not by the caller) so this function's own "at
             most `count` entries" contract holds regardless of who calls it
@@ -67,15 +79,16 @@ def get_next_departures(route_id: str, stop_id: str, direction: int, data: dict,
     Returns:
         dict: {
             "departures": [
-                {"departure_time": "HH:MM:SS", "minutes_away": int},
+                {"departure_time": "HH:MM:SS", "minutes_away": int, "is_realtime": bool},
                 ...  # soonest first, at most `count` entries, [] if none found
             ]
         }
     """
     count = max(1, min(count, 10))
+    realtime_data = realtime_data or {}
     current_time = datetime.datetime.now()
     stops = data.get("stops", {})
-    upcoming_departure_times = []
+    upcoming = []  # list of (departure_time, is_realtime) tuples
 
     for trip_id, trip_info in data["trips"].items():
         if trip_info['route_id'] == route_id and trip_info['direction_id'] == str(direction):
@@ -88,24 +101,33 @@ def get_next_departures(route_id: str, stop_id: str, direction: int, data: dict,
                     None
                 )
                 if platform_stop_id:
-                    departure_time_str = stop_time_info[platform_stop_id].get('departure_time')
-                    departure_time = _parse_gtfs_time(departure_time_str, current_time.date()) if departure_time_str else None
+                    live_epoch = realtime_data.get(trip_id, {}).get(platform_stop_id)
+                    if live_epoch:
+                        departure_time = datetime.datetime.fromtimestamp(live_epoch)
+                        is_realtime = True
+                    else:
+                        departure_time_str = stop_time_info[platform_stop_id].get('departure_time')
+                        departure_time = _parse_gtfs_time(departure_time_str, current_time.date()) if departure_time_str else None
+                        is_realtime = False
                     if departure_time and departure_time > current_time:
-                        upcoming_departure_times.append(departure_time)
+                        upcoming.append((departure_time, is_realtime))
 
-    upcoming_departure_times.sort()
-    soonest = upcoming_departure_times[:count]
+    upcoming.sort(key=lambda pair: pair[0])
+    soonest = upcoming[:count]
     departures = [
         {
             "departure_time": dt.strftime('%H:%M:%S'),
             "minutes_away": int((dt - current_time).total_seconds() / 60),
+            "is_realtime": is_realtime,
         }
-        for dt in soonest
+        for dt, is_realtime in soonest
     ]
 
-    # One summary line per request, listing every returned departure.
-    print(f"[{route_id}/{stop_id} dir={direction}] next {len(departures)} departure(s): "
-          f"{', '.join(d['departure_time'] for d in departures) if departures else 'none'}")
+    # One summary line per request, listing every returned departure and how
+    # many came from a live prediction versus the static schedule.
+    live_count = sum(1 for d in departures if d["is_realtime"])
+    print(f"[{route_id}/{stop_id} dir={direction}] next {len(departures)} departure(s) "
+          f"({live_count} live): {', '.join(d['departure_time'] for d in departures) if departures else 'none'}")
 
     return {"departures": departures}
 

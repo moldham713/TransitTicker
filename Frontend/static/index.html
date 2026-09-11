@@ -72,6 +72,34 @@
     font-weight: 700;
     font-size: 1.1rem;
   }
+  .departure-row .left {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: #34d399;
+    text-transform: uppercase;
+  }
+  .live-badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34d399;
+  }
+  .scheduled-badge {
+    font-size: 0.65rem;
+    color: #5b6577;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
   /* Soonest departure (first row) reads like the headline number on a real
      platform countdown clock; the rest are supporting detail below it. */
   .departure-row:first-child {
@@ -312,7 +340,14 @@ function App() {
           {result.departures && result.departures.length > 0 ? (
             result.departures.map((d, i) => (
               <div className="departure-row" key={i}>
-                <span className="minutes">{d.minutes_away} min</span>
+                <span className="left">
+                  <span className="minutes">{d.minutes_away} min</span>
+                  {d.is_realtime ? (
+                    <span className="live-badge">Live</span>
+                  ) : (
+                    <span className="scheduled-badge">Scheduled</span>
+                  )}
+                </span>
                 <span className="time">{d.departure_time}</span>
               </div>
             ))
