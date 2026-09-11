@@ -1,0 +1,20 @@
+services:
+  backend:
+    build: ./Backend
+    ports:
+      - "5000:5000"
+
+  frontend:
+    build: ./Frontend
+    ports:
+      - "5001:5001"
+    environment:
+      # This must be a URL the *browser* can reach, not a Docker-internal
+      # service name like "http://backend:5000" - fetch() calls made by the
+      # page run in the user's browser on the host machine, not inside the
+      # frontend container, so the Docker-only "backend" hostname would not
+      # resolve there. Since backend's port 5000 is published to the host
+      # above, localhost:5000 is what the browser can actually reach.
+      - BACKEND_API_URL=http://localhost:5000
+    depends_on:
+      - backend

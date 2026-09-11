@@ -61,3 +61,49 @@ def get_next_departure_time(route_id: str, stop_id: str, direction: int, data: d
 
     return {"next_departure_time": next_departure.strftime('%H:%M:%S') if next_departure else None,
             "minutes_away": int(diff) if diff is not None else None}
+
+
+def get_routes(data: dict) -> list:
+    """
+    List every route ID the currently loaded feed knows about, so a client
+    (e.g. a route dropdown) can offer only valid choices instead of guessing.
+
+    Args:
+        data (dict): A dictionary containing transit data populated in refresh.py.
+
+    Returns:
+        list[str]: Sorted, de-duplicated route IDs.
+    """
+    return sorted(set(data.get("routes", [])))
+
+
+def get_stops_for_route(route_id: str, data: dict) -> list:
+    """
+    List the stops actually served by a given route, so a client can populate
+    a stop dropdown that's scoped to the route already chosen instead of
+    showing every stop in the system (NYC subway + bus has thousands).
+
+    Args:
+        route_id (str): The ID of the transit route.
+        data (dict): A dictionary containing transit data populated in refresh.py.
+
+    Returns:
+        list[dict]: One entry per stop, each {'stop_id': str, 'stop_name': str},
+        sorted by stop name. Empty if the route ID is unknown.
+    """
+    trips = data.get("trips", {})
+    stop_times = data.get("stop_times", {})
+    stops = data.get("stops", {})
+
+    stop_ids = set()
+    for trip_id, trip_info in trips.items():
+        if trip_info['route_id'] == route_id:
+            stop_ids.update(stop_times.get(trip_id, {}).keys())
+
+    return sorted(
+        (
+            {"stop_id": stop_id, "stop_name": stops.get(stop_id, {}).get('stop_name', stop_id)}
+            for stop_id in stop_ids
+        ),
+        key=lambda s: s["stop_name"]
+    )

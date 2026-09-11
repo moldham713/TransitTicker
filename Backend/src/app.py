@@ -1,13 +1,18 @@
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 import schedule
 import threading
 import time
 import os
 from refresh import refresh_transit_data
-from getters import get_next_departure_time
+from getters import get_next_departure_time, get_routes, get_stops_for_route
 
 
 app = Flask(__name__)
+# The React frontend runs in the browser as its own origin (a separate
+# container/port), so it needs CORS enabled here to be allowed to call this
+# API directly with fetch().
+CORS(app)
 
 transit_data = {}
 # Guards transit_data during the brief swap in refresh_transit_data, and during
@@ -25,6 +30,23 @@ def home():
 
     with transit_data_lock:
         result = get_next_departure_time(route, stop, direction, transit_data)
+    return jsonify(result)
+
+
+@app.route('/routes', methods=['GET'])
+def routes():
+    """List every known route ID, e.g. for populating a route dropdown."""
+    with transit_data_lock:
+        result = get_routes(transit_data)
+    return jsonify(result)
+
+
+@app.route('/routes/<route_id>/stops', methods=['GET'])
+def stops_for_route(route_id):
+    """List the stops served by `route_id`, e.g. for a stop dropdown scoped to
+    whichever route the client already picked."""
+    with transit_data_lock:
+        result = get_stops_for_route(route_id, transit_data)
     return jsonify(result)
 
 

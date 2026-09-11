@@ -1,0 +1,77 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# id-token: write is required for OIDC federation with AWS (no static AWS
+# access keys stored as repo secrets).
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECS_CLUSTER: transitticker-cluster
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      # Backend and frontend are independent services with independent
+      # Dockerfiles/ECR repos - build and deploy them in parallel rather than
+      # as sequential steps in one job.
+      matrix:
+        include:
+          - name: backend
+            context: ./Backend
+            ecr_repo: transitticker-backend
+            ecs_service: transitticker-backend
+          - name: frontend
+            context: ./Frontend
+            ecr_repo: transitticker-frontend
+            ecs_service: transitticker-frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          REPO: ${{ matrix.ecr_repo }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -t "$REGISTRY/$REPO:$IMAGE_TAG" \
+            -t "$REGISTRY/$REPO:latest" \
+            "${{ matrix.context }}"
+          docker push "$REGISTRY/$REPO:$IMAGE_TAG"
+          docker push "$REGISTRY/$REPO:latest"
+
+      - name: Roll the ECS service onto the new image
+        # The task definition already points at ":latest" (set by Terraform);
+        # force-new-deployment starts fresh tasks, which re-pull whatever
+        # ":latest" now resolves to - no new task definition revision needed
+        # for routine deploys.
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "${{ matrix.ecs_service }}" \
+            --force-new-deployment
+
+      - name: Wait for service to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "${{ matrix.ecs_service }}"

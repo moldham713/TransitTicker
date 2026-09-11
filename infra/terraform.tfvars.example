@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (git-ignored) and adjust if needed.
+# All of these have working defaults in variables.tf - this file only exists
+# to make the values easy to find and override.
+
+aws_region   = "us-east-1"
+project_name = "transitticker"
+github_repo  = "moldham713/TransitTicker"

@@ -1,2 +1,10 @@
 Backend/data/*
 temp.txt
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/terraform.tfvars
+infra/*.tfplan
+infra/crash.log
