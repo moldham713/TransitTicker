@@ -2,6 +2,21 @@
 
 import datetime
 
+
+def _parse_gtfs_time(time_str: str, service_day: datetime.date) -> datetime.datetime:
+    """
+    Parse a GTFS HH:MM:SS time string into a full datetime anchored to the given
+    service day. GTFS allows hours >= 24 to represent times after midnight that
+    still belong to the previous day's service (e.g. a 25:30:00 departure is
+    1:30 AM the following calendar day). datetime.strptime can't parse hours
+    above 23, so this splits the string manually and rolls the day over via
+    timedelta instead.
+    """
+    hour_str, minute_str, second_str = time_str.split(':')
+    return datetime.datetime(service_day.year, service_day.month, service_day.day) + \
+        datetime.timedelta(hours=int(hour_str), minutes=int(minute_str), seconds=int(second_str))
+
+
 def get_next_departure_time(route_id: str, stop_id: str, direction: int, data: dict) -> dict:
     """
     Get the next departure time for a transit vehicle at a specific stop.
@@ -33,8 +48,7 @@ def get_next_departure_time(route_id: str, stop_id: str, direction: int, data: d
                 if stop_id in stop_time_info:
                     print("found matching stop ", stop_id, " in trip ", trip_id)
                     departure_time_str = stop_time_info.get(stop_id, {}).get('departure_time')
-                    departure_time_temp = datetime.datetime.strptime(departure_time_str, '%H:%M:%S') if departure_time_str else None
-                    departure_time = datetime.datetime(current_time.year, current_time.month, current_time.day, departure_time_temp.hour, departure_time_temp.minute, departure_time_temp.second) if departure_time_temp else None
+                    departure_time = _parse_gtfs_time(departure_time_str, current_time.date()) if departure_time_str else None
                     if departure_time and departure_time > current_time:
                         print("valid arrival time found:", departure_time)
                         if next_departure is None or departure_time < next_departure:
