@@ -103,7 +103,8 @@ for POLICY_ARN in \
   "arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess" \
   "arn:aws:iam::aws:policy/AmazonECS_FullAccess" \
   "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess" \
-  "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+  "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess" \
+  "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
 do
   aws iam attach-role-policy --role-name "$TF_ROLE_NAME" --policy-arn "$POLICY_ARN"
 done

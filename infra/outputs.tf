@@ -27,3 +27,7 @@ output "backend_service_name" {
 output "frontend_service_name" {
   value = aws_ecs_service.frontend.name
 }
+
+output "users_table_name" {
+  value = aws_dynamodb_table.users.name
+}

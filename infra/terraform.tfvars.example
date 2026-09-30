@@ -1,7 +1,11 @@
 # Copy to terraform.tfvars (git-ignored) and adjust if needed.
-# All of these have working defaults in variables.tf - this file only exists
-# to make the values easy to find and override.
+# Most of these have working defaults in variables.tf - this file only
+# exists to make the values easy to find and override.
 
 aws_region   = "us-east-1"
 project_name = "transitticker"
 github_repo  = "moldham713/TransitTicker"
+
+# No default - required. See variables.tf for where this comes from and
+# what to configure on the credential itself.
+google_client_id = "your-client-id.apps.googleusercontent.com"

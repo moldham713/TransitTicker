@@ -60,3 +60,19 @@ variable "frontend_memory" {
   type        = number
   default     = 512
 }
+
+variable "google_client_id" {
+  description = <<-EOT
+    OAuth 2.0 Client ID from Google Cloud Console (APIs & Services >
+    Credentials > Create Credentials > OAuth client ID > Web application).
+    Not a secret - it's meant to be embedded in frontend JS - but it has no
+    sensible default since it's specific to whoever's Google Cloud project
+    this points at. Set it in terraform.tfvars or pass
+    -var="google_client_id=..." at apply time. Add both the frontend URL
+    (http://localhost:5001 for local dev) and the ALB's URL (see the
+    alb_dns_name output, port 80) as Authorized JavaScript origins on the
+    credential itself, or the Google sign-in button will fail with an
+    origin-mismatch error.
+  EOT
+  type        = string
+}

@@ -119,6 +119,79 @@
     margin-top: 14px;
     line-height: 1.4;
   }
+  .auth-bar {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #223049;
+  }
+  .auth-bar .signed-in {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .auth-bar .who {
+    font-size: 0.85rem;
+    color: #a7b2c4;
+  }
+  .auth-bar .sign-out {
+    width: auto;
+    margin-top: 0;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    background: #1c2740;
+  }
+  .device-token {
+    margin-top: 8px;
+    font-size: 0.72rem;
+    color: #5b6577;
+    font-family: ui-monospace, monospace;
+    word-break: break-all;
+  }
+  .my-stations {
+    margin: 20px 0;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #223049;
+  }
+  .my-stations h2 {
+    font-size: 0.95rem;
+    margin: 0 0 2px;
+  }
+  .my-stations .sub {
+    margin: 0 0 16px;
+  }
+  .slot {
+    padding: 12px;
+    margin-bottom: 10px;
+    border: 1px solid #223049;
+    border-radius: 8px;
+    background: #0e1626;
+  }
+  .slot-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #a7b2c4;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .slot select {
+    margin-bottom: 8px;
+  }
+  .slot select:last-of-type {
+    margin-bottom: 0;
+  }
+  .clear-slot {
+    width: auto;
+    margin-top: 8px;
+    padding: 5px 10px;
+    font-size: 0.75rem;
+    background: #1c2740;
+  }
+  .section-heading {
+    font-size: 0.95rem;
+    margin: 0 0 16px;
+  }
   .boot-status {
     color: #8b96a8;
     font-size: 0.85rem;
@@ -196,12 +269,20 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
 
+<!-- Google Identity Services: renders the "Sign in with Google" button and
+     hands back a signed ID token directly in the browser - no OAuth
+     redirect/callback dance needed, since this app only needs to know who
+     signed in, not to call a Google API on their behalf. Loads async, so
+     the React code below polls briefly for window.google rather than
+     assuming it's ready by the time it runs. -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
 <!-- Injected by the Flask server at runtime from the BACKEND_API_URL env var,
      so this image doesn't need to be rebuilt to point at a different backend. -->
 <script src="/config.js"></script>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect, useCallback, useRef } = React;
 
 const BACKEND_URL = window.BACKEND_API_URL || "http://localhost:5000";
 
@@ -209,6 +290,79 @@ const DIRECTIONS = [
   { value: 0, label: "Uptown (0)" },
   { value: 1, label: "Downtown (1)" },
 ];
+
+// One saved-station slot: its own route/stop/direction pickers, reusing
+// the same /routes/<id>/stops lookup the main departure board uses. Kept
+// as a separate component (rather than inlined 3 times in App) so each
+// slot's own "stops for this route" fetch and loading state stay isolated
+// from the other two slots.
+function StationPicker({ label, routes, value, onChange }) {
+  const [stops, setStops] = useState([]);
+  const [loadingStops, setLoadingStops] = useState(false);
+
+  const route = value ? value.route : "";
+  const stop = value ? value.stop : "";
+  const direction = value ? value.direction : 1;
+
+  useEffect(() => {
+    if (!route) {
+      setStops([]);
+      return;
+    }
+    setLoadingStops(true);
+    fetch(`${BACKEND_URL}/routes/${encodeURIComponent(route)}/stops`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`backend returned ${res.status}`);
+        return res.json();
+      })
+      .then(setStops)
+      .catch(() => setStops([]))
+      .finally(() => setLoadingStops(false));
+  }, [route]);
+
+  return (
+    <div className="slot">
+      <div className="slot-label">{label}</div>
+      <select
+        value={route}
+        onChange={(e) => {
+          const newRoute = e.target.value;
+          if (!newRoute) {
+            onChange(null);
+          } else {
+            onChange({ route: newRoute, stop: "", direction: 1 });
+          }
+        }}
+      >
+        <option value="">Select a route</option>
+        {routes.map((r) => (
+          <option key={r} value={r}>{r}</option>
+        ))}
+      </select>
+      <select
+        value={stop}
+        onChange={(e) => onChange({ route, stop: e.target.value, direction })}
+        disabled={!route || loadingStops}
+      >
+        <option value="">{loadingStops ? "Loading stops..." : "Select a stop"}</option>
+        {stops.map((s) => (
+          <option key={s.stop_id} value={s.stop_id}>{s.stop_name}</option>
+        ))}
+      </select>
+      <select
+        value={direction}
+        onChange={(e) => onChange({ route, stop, direction: Number(e.target.value) })}
+      >
+        {DIRECTIONS.map((d) => (
+          <option key={d.value} value={d.value}>{d.label}</option>
+        ))}
+      </select>
+      {value && (
+        <button className="clear-slot" onClick={() => onChange(null)}>Clear</button>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const [routes, setRoutes] = useState([]);
@@ -221,6 +375,125 @@ function App() {
   const [loadingStops, setLoadingStops] = useState(false);
   const [loadingResult, setLoadingResult] = useState(false);
   const [error, setError] = useState(null);
+
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const googleButtonRef = useRef(null);
+
+  // On mount, see if a session cookie from a previous visit is still valid
+  // (credentials: "include" is required for the browser to send it at all
+  // on a cross-origin request), so returning users don't have to sign in
+  // again every time. A 401 here just means "not currently signed in" -
+  // not an error worth surfacing to the user.
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/auth/me`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  const handleGoogleCredential = useCallback((response) => {
+    fetch(`${BACKEND_URL}/auth/google`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_token: response.credential }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`backend returned ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        setUser(data);
+        setError(null);
+      })
+      .catch((err) => setError(`Sign-in failed: ${err.message}`));
+  }, []);
+
+  // Renders Google's own Sign In button once its script has finished
+  // loading (it's marked async, so window.google may not exist yet the
+  // first time this runs - this polls briefly rather than assuming it is)
+  // and only while there's no active session to show it for.
+  useEffect(() => {
+    if (!authChecked || user || !googleButtonRef.current) return;
+    if (!window.GOOGLE_CLIENT_ID) {
+      setError("Sign-in is not configured (missing GOOGLE_CLIENT_ID).");
+      return;
+    }
+
+    let cancelled = false;
+    const tryInit = () => {
+      if (cancelled) return;
+      if (window.google && window.google.accounts && window.google.accounts.id) {
+        window.google.accounts.id.initialize({
+          client_id: window.GOOGLE_CLIENT_ID,
+          callback: handleGoogleCredential,
+        });
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          theme: "filled_blue",
+          size: "large",
+          width: 320,
+        });
+      } else {
+        setTimeout(tryInit, 100);
+      }
+    };
+    tryInit();
+
+    return () => { cancelled = true; };
+  }, [authChecked, user, handleGoogleCredential]);
+
+  const signOut = useCallback(() => {
+    fetch(`${BACKEND_URL}/auth/logout`, { method: "POST", credentials: "include" })
+      .finally(() => setUser(null));
+  }, []);
+
+  // Always exactly 3 UI slots, some possibly empty (null) - the backend
+  // only ever stores the compact list of filled ones (see savePreferences
+  // below), so this pads/truncates whatever comes back from login or
+  // /auth/me into fixed slot positions for the 3 pickers to bind to.
+  const [preferences, setPreferences] = useState([null, null, null]);
+  const [savingPreferences, setSavingPreferences] = useState(false);
+  const [preferencesSaved, setPreferencesSaved] = useState(false);
+
+  useEffect(() => {
+    const saved = (user && user.preferences) || [];
+    setPreferences([saved[0] || null, saved[1] || null, saved[2] || null]);
+    setPreferencesSaved(false);
+  }, [user]);
+
+  const updateSlot = useCallback((index, value) => {
+    setPreferences((prev) => {
+      const next = prev.slice();
+      next[index] = value;
+      return next;
+    });
+    setPreferencesSaved(false);
+  }, []);
+
+  const savePreferences = useCallback(() => {
+    setSavingPreferences(true);
+    fetch(`${BACKEND_URL}/preferences`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      // Nulls (empty slots) are dropped rather than sent - the backend's
+      // stored list is just "the stations you've set", not 3 fixed
+      // positions with gaps.
+      body: JSON.stringify({ preferences: preferences.filter(Boolean) }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`backend returned ${res.status}`);
+        return res.json();
+      })
+      .then(() => {
+        setPreferencesSaved(true);
+        setError(null);
+      })
+      .catch((err) => setError(`Could not save stations: ${err.message}`))
+      .finally(() => setSavingPreferences(false));
+  }, [preferences]);
 
   // Load the route list once on mount.
   useEffect(() => {
@@ -289,6 +562,44 @@ function App() {
     <div className="card">
       <h1>TransitTicker</h1>
       <p className="sub">Embedded display simulator</p>
+
+      <div className="auth-bar">
+        {user ? (
+          <div>
+            <div className="signed-in">
+              <span className="who">Signed in</span>
+              <button className="sign-out" onClick={signOut}>Sign out</button>
+            </div>
+            <div className="device-token">Device token: {user.device_token}</div>
+          </div>
+        ) : (
+          <div ref={googleButtonRef}></div>
+        )}
+      </div>
+
+      {user && (
+        <div className="my-stations">
+          <h2>My Stations</h2>
+          <p className="sub">
+            Saved to your account and served to your embedded device via its
+            device token above.
+          </p>
+          {[0, 1, 2].map((i) => (
+            <StationPicker
+              key={i}
+              label={`Station ${i + 1}`}
+              routes={routes}
+              value={preferences[i]}
+              onChange={(v) => updateSlot(i, v)}
+            />
+          ))}
+          <button onClick={savePreferences} disabled={savingPreferences}>
+            {savingPreferences ? "Saving..." : preferencesSaved ? "Saved" : "Save My Stations"}
+          </button>
+        </div>
+      )}
+
+      <h2 className="section-heading">Quick Lookup</h2>
 
       <label htmlFor="route-select">Route</label>
       <select

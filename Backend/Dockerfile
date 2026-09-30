@@ -18,6 +18,8 @@ RUN pip install flask
 RUN pip install flask-cors
 RUN pip install schedule
 RUN pip install gtfs-realtime-bindings
+RUN pip install boto3
+RUN pip install google-auth
 
 # Set the timezone environment variable
 ENV TZ="America/New_York"

@@ -16,6 +16,11 @@ env:
   AWS_REGION: us-east-1
   TF_STATE_KEY: transitticker/terraform.tfstate
   TF_VERSION: "1.9.8"
+  # Terraform reads any TF_VAR_<name> environment variable automatically for
+  # the matching declared variable - this is how google_client_id (required,
+  # no default - see infra/variables.tf) gets supplied in CI. Not a secret,
+  # so a repo variable rather than a secret is the right place for it.
+  TF_VAR_google_client_id: ${{ vars.GOOGLE_CLIENT_ID }}
 
 jobs:
   # Runs on every PR/push/manual trigger - shows what would change, applies

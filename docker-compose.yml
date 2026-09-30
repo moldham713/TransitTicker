@@ -3,6 +3,34 @@ services:
     build: ./Backend
     ports:
       - "5000:5000"
+    environment:
+      # Points the backend at DynamoDB Local instead of real AWS - see
+      # Backend/src/users.py. Only set here, never in the production task
+      # definition (infra/ecs.tf), where the app talks to the real table
+      # using credentials from its ECS task role.
+      - DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000
+      - AWS_REGION=us-east-1
+      - DYNAMODB_TABLE_NAME=transitticker-users
+      # ${VAR} here reads from a .env file next to this one (see
+      # .env.example) or your shell environment - never hardcoded, since a
+      # Google Client ID is specific to whoever's Google Cloud project this
+      # points at. GOOGLE_CLIENT_ID isn't a secret, but SESSION_SECRET_KEY
+      # is a real signing key even in dev, so both stay out of this
+      # committed file either way.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:-local-dev-secret-not-for-production}
+      - FRONTEND_ORIGIN=http://localhost:5001
+    depends_on:
+      - dynamodb-local
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    ports:
+      - "8000:8000"
+    # -inMemory: data resets on every restart rather than persisting to a
+    # volume - deliberate for local dev, so it always starts from a clean
+    # slate instead of accumulating stale test data across rebuilds.
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
 
   frontend:
     build: ./Frontend
@@ -16,5 +44,6 @@ services:
       # resolve there. Since backend's port 5000 is published to the host
       # above, localhost:5000 is what the browser can actually reach.
       - BACKEND_API_URL=http://localhost:5000
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
     depends_on:
       - backend

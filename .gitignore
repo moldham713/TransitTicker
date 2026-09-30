@@ -1,6 +1,9 @@
 Backend/data/*
 temp.txt
 
+# Local docker-compose secrets (see .env.example)
+.env
+
 # Terraform
 infra/.terraform/
 infra/*.tfstate

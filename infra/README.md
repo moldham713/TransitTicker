@@ -3,7 +3,8 @@
 Terraform for running both containers (`Backend/`, `Frontend/`) on AWS: one
 VPC, one Application Load Balancer (frontend on port 80, backend API on port
 8080), one ECS cluster running both as Fargate services, one ECR repo per
-image, and an IAM role GitHub Actions assumes via OIDC to deploy.
+image, a DynamoDB table for user accounts and saved station preferences, and
+an IAM role GitHub Actions assumes via OIDC to deploy.
 
 No NAT Gateway is used - tasks sit in public subnets with locked-down
 security groups. This alone saves roughly $32/month, the single biggest
@@ -29,6 +30,11 @@ without a human doing something inside AWS itself.
    - `TF_APPLY_ROLE_ARN`
    - `TF_STATE_BUCKET`
    - `TF_STATE_LOCK_TABLE`
+
+   Also set `GOOGLE_CLIENT_ID` there - not a secret, but `terraform plan`
+   and `apply` both need it (it fills `var.google_client_id`, which has no
+   default). See variables.tf for where to get this value and what to
+   configure on the credential itself.
 
 3. Create a GitHub Environment named `aws-infra` (Settings → Environments →
    New environment) and add yourself as a required reviewer. This is what
@@ -81,8 +87,11 @@ CI-driven app deploys and infrastructure changes don't fight each other.
 
 Roughly, always-on: ALB ~$16-20/month plus usage, two 0.25 vCPU / 512 MB
 Fargate tasks around $9-18/month combined, ECR storage and CloudWatch logs
-negligible. No NAT Gateway. Ballpark **$25-40/month** while both services are
-running continuously.
+negligible. No NAT Gateway. DynamoDB's PAY_PER_REQUEST billing means the
+users table costs essentially nothing at this project's scale - a handful
+of pennies a month at most, since cost scales with actual reads/writes
+rather than a provisioned baseline. Ballpark **$25-40/month** while both
+services are running continuously.
 
 To stop paying between demos without deleting anything: scale both services
 to zero. This keeps the same ALB DNS name for next time (the ALB itself

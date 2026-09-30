@@ -12,12 +12,21 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
 # point at a different backend without a rebuild.
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL', 'http://localhost:5000')
 
+# Not a secret - Google Client IDs are meant to be embedded in frontend JS -
+# but it's specific to whoever's Google Cloud project this points at, so it
+# comes from an env var rather than being hardcoded here.
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+
 
 @app.route('/config.js')
 def config_js():
     # Served as JS (not JSON) so index.html can load it with a plain
     # <script src="/config.js"> tag before the app code runs.
-    return Response(f'window.BACKEND_API_URL = {BACKEND_API_URL!r};', mimetype='application/javascript')
+    return Response(
+        f'window.BACKEND_API_URL = {BACKEND_API_URL!r};\n'
+        f'window.GOOGLE_CLIENT_ID = {GOOGLE_CLIENT_ID!r};',
+        mimetype='application/javascript',
+    )
 
 
 @app.route('/')

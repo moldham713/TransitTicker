@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 import schedule
 import threading
@@ -8,13 +8,25 @@ import traceback
 from refresh import refresh_transit_data
 from realtime import refresh_realtime_data
 from getters import get_next_departures, get_routes, get_stops_for_route
+from users import ensure_table_exists, get_or_create_user, get_user_by_id, save_preferences
+from auth import verify_google_id_token, login_required
 
 
 app = Flask(__name__)
+
+# Signs session cookies - see infra/ecs.tf's random_password.session_secret
+# for how this is generated in production. The default here is only ever
+# used locally, where real security doesn't matter for a throwaway session.
+app.secret_key = os.environ.get('SESSION_SECRET_KEY', 'local-dev-secret-not-for-production')
+
 # The React frontend runs in the browser as its own origin (a separate
 # container/port), so it needs CORS enabled here to be allowed to call this
-# API directly with fetch().
-CORS(app)
+# API directly with fetch(). supports_credentials + a specific origin
+# (rather than "*") is required for the session cookie /auth/* sets to be
+# sent on cross-origin requests at all - browsers reject the combination of
+# a wildcard origin with credentialed requests outright.
+FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5001')
+CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
 
 transit_data = {}
 # Guards transit_data during the brief swap in refresh_transit_data, and during
@@ -75,6 +87,125 @@ def stops_for_route(route_id):
     return jsonify(result)
 
 
+def _user_response(user: dict) -> dict:
+    """The subset of a user record that's safe and useful to hand back to
+    the frontend - never the raw oauth_subject, which isn't needed client-
+    side and has no reason to leave the backend."""
+    return {
+        "user_id": user['user_id'],
+        "device_token": user['device_token'],
+        "preferences": user.get('preferences', []),
+    }
+
+
+@app.route('/auth/google', methods=['POST'])
+def auth_google():
+    """
+    Exchange a Google ID token (from the frontend's Sign-In button) for a
+    logged-in session, creating the user's record on first login.
+    """
+    id_token_str = (request.get_json(silent=True) or {}).get('id_token')
+    if not id_token_str:
+        return jsonify({"error": "id_token is required"}), 400
+
+    try:
+        subject = verify_google_id_token(id_token_str)
+    except Exception as exc:
+        # Covers google-auth's own errors (expired token, bad signature,
+        # wrong audience) and network errors fetching Google's public keys -
+        # all of these mean this particular login attempt failed, not that
+        # the server itself is broken, hence 401 rather than 500.
+        return jsonify({"error": f"invalid Google ID token: {exc}"}), 401
+
+    user = get_or_create_user('google', subject)
+    session['user_id'] = user['user_id']
+    session.permanent = True
+
+    return jsonify(_user_response(user))
+
+
+@app.route('/auth/me', methods=['GET'])
+@login_required
+def auth_me():
+    """Current session's user info, so the frontend can restore login state
+    on page load without repeating the Google sign-in flow."""
+    user = get_user_by_id(session['user_id'])
+    if not user:
+        # The DB record is gone (e.g. manually deleted) even though the
+        # session cookie still names it - treat that as logged out rather
+        # than crashing on the missing record.
+        session.clear()
+        return jsonify({"error": "login required"}), 401
+    return jsonify(_user_response(user))
+
+
+@app.route('/auth/logout', methods=['POST'])
+def auth_logout():
+    session.clear()
+    return jsonify({"status": "logged out"})
+
+
+def _validate_preferences(preferences):
+    """
+    Check that a preferences payload is well-formed: at most 3 entries,
+    each a {route, stop, direction} object with a non-empty route/stop and
+    direction 0 or 1. Doesn't check that the route/stop combination
+    corresponds to any real, currently-known station - that would mean
+    cross-referencing transit_data at save time for fairly little benefit,
+    since a bad combination just means "no departures found" later, the
+    same as it would for the / endpoint's own route/stop/direction params.
+
+    Returns:
+        (True, cleaned_list) if valid, (False, error_message) otherwise.
+    """
+    if not isinstance(preferences, list):
+        return False, "preferences must be a list"
+    if len(preferences) > 3:
+        return False, "at most 3 saved stations are allowed"
+
+    cleaned = []
+    for i, pref in enumerate(preferences):
+        if not isinstance(pref, dict):
+            return False, f"preferences[{i}] must be an object"
+        route = pref.get('route')
+        stop = pref.get('stop')
+        direction = pref.get('direction')
+        if not isinstance(route, str) or not route:
+            return False, f"preferences[{i}].route is required"
+        if not isinstance(stop, str) or not stop:
+            return False, f"preferences[{i}].stop is required"
+        if direction not in (0, 1):
+            return False, f"preferences[{i}].direction must be 0 or 1"
+        cleaned.append({"route": route, "stop": stop, "direction": direction})
+    return True, cleaned
+
+
+@app.route('/preferences', methods=['GET'])
+@login_required
+def get_preferences():
+    """The logged-in user's saved stations - identified entirely from the
+    session, never a request parameter, so one user can never read
+    another's by guessing an id."""
+    user = get_user_by_id(session['user_id'])
+    if not user:
+        session.clear()
+        return jsonify({"error": "login required"}), 401
+    return jsonify({"preferences": user.get('preferences', [])})
+
+
+@app.route('/preferences', methods=['POST'])
+@login_required
+def update_preferences():
+    """Overwrite the logged-in user's saved stations with the full list
+    provided - not a partial merge, matching users.save_preferences."""
+    body = request.get_json(silent=True) or {}
+    valid, result = _validate_preferences(body.get('preferences'))
+    if not valid:
+        return jsonify({"error": result}), 400
+    save_preferences(session['user_id'], result)
+    return jsonify({"preferences": result})
+
+
 def run_scheduler() -> None:
     """Background loop that actually executes jobs registered with `schedule`.
 
@@ -100,6 +231,11 @@ def run_scheduler() -> None:
 
 
 if __name__ == '__main__':
+    # No-ops in production - see users.py's docstring. In local dev, creates
+    # the users table against DynamoDB Local on first run, since nothing
+    # else provisions it there the way Terraform does for the real table.
+    ensure_table_exists()
+
     if not refresh_transit_data(data=transit_data, lock=transit_data_lock):
         print("WARNING: initial transit data load failed; serving no data until the next scheduled refresh succeeds.")
 

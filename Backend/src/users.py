@@ -1,0 +1,162 @@
+# Data access layer for user accounts and saved station preferences,
+# backed by DynamoDB. app.py's /auth/* routes call get_or_create_user and
+# get_user_by_id directly; get_user_by_device_token and save_preferences
+# are what the device-facing endpoint and preferences API build on next.
+#
+# A user's device_token is deliberately not the same value as their
+# user_id: the device_token is what an embedded device presents to the API
+# to fetch its owner's saved departures, with no login/session involved.
+# If that were the same value used to identify the logged-in account, a
+# guessable or leaked user_id would expose someone's saved home/work
+# stations - their commute pattern - to anyone who could guess it. Keeping
+# them separate means the device only ever knows an opaque token, never an
+# identity.
+
+import os
+import secrets
+from typing import Optional
+
+import boto3
+from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
+
+# Set only for local development (docker-compose) to point at DynamoDB
+# Local instead of the real AWS service. Left unset in production, where
+# boto3 picks up real credentials from the backend's ECS task role
+# automatically (see infra/ecs.tf's aws_iam_role.backend_task).
+DYNAMODB_ENDPOINT_URL = os.environ.get('DYNAMODB_ENDPOINT_URL')
+AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+TABLE_NAME = os.environ.get('DYNAMODB_TABLE_NAME', 'transitticker-users')
+
+_resource_kwargs = {'region_name': AWS_REGION}
+if DYNAMODB_ENDPOINT_URL:
+    _resource_kwargs['endpoint_url'] = DYNAMODB_ENDPOINT_URL
+    # DynamoDB Local doesn't validate credentials at all, but boto3 still
+    # needs some access key present to construct a request rather than
+    # trying (and failing) to find real AWS credentials that don't exist
+    # in a local dev container.
+    _resource_kwargs['aws_access_key_id'] = 'local'
+    _resource_kwargs['aws_secret_access_key'] = 'local'
+
+dynamodb = boto3.resource('dynamodb', **_resource_kwargs)
+table = dynamodb.Table(TABLE_NAME)
+
+
+def ensure_table_exists() -> None:
+    """
+    Create the users table against DynamoDB Local if it doesn't already
+    exist, matching the same key schema and GSI infra/dynamodb.tf defines
+    for the real table. Only ever does anything when DYNAMODB_ENDPOINT_URL
+    is set (local dev) - production always targets the table Terraform
+    already created, and application code never attempts to create or
+    modify infrastructure there.
+    """
+    if not DYNAMODB_ENDPOINT_URL:
+        return
+    try:
+        dynamodb.create_table(
+            TableName=TABLE_NAME,
+            KeySchema=[{'AttributeName': 'user_id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'user_id', 'AttributeType': 'S'},
+                {'AttributeName': 'device_token', 'AttributeType': 'S'},
+            ],
+            GlobalSecondaryIndexes=[{
+                'IndexName': 'device_token-index',
+                'KeySchema': [{'AttributeName': 'device_token', 'KeyType': 'HASH'}],
+                'Projection': {'ProjectionType': 'ALL'},
+            }],
+            BillingMode='PAY_PER_REQUEST',
+        )
+        table.wait_until_exists()
+        print(f"Created local DynamoDB table '{TABLE_NAME}'.")
+    except ClientError as exc:
+        if exc.response['Error']['Code'] != 'ResourceInUseException':
+            raise
+        # Table already exists from a previous run - nothing to do.
+
+
+def _new_device_token() -> str:
+    """A long, random, opaque token unrelated to the user's login identity -
+    see this module's docstring for why that separation matters."""
+    return secrets.token_urlsafe(24)
+
+
+def get_or_create_user(oauth_provider: str, oauth_subject: str) -> dict:
+    """
+    Look up the user record for a given OAuth identity, creating one with
+    empty preferences and a fresh device token on first login.
+
+    Args:
+        oauth_provider (str): e.g. "google".
+        oauth_subject (str): the provider's unique, stable identifier for
+            this account (Google's `sub` claim).
+
+    Returns:
+        dict: the user record - {"user_id", "oauth_provider",
+        "oauth_subject", "device_token", "preferences"}.
+    """
+    user_id = f"{oauth_provider}#{oauth_subject}"
+    existing = table.get_item(Key={'user_id': user_id}).get('Item')
+    if existing:
+        return existing
+
+    new_user = {
+        'user_id': user_id,
+        'oauth_provider': oauth_provider,
+        'oauth_subject': oauth_subject,
+        'device_token': _new_device_token(),
+        'preferences': [],
+    }
+    try:
+        # Only write if this user_id doesn't already exist, so two
+        # concurrent first-logins for the same account can't each generate
+        # a different device_token and overwrite one another.
+        table.put_item(Item=new_user, ConditionExpression='attribute_not_exists(user_id)')
+        return new_user
+    except ClientError as exc:
+        if exc.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            # Someone else's concurrent request created it a moment ago -
+            # read back what they actually wrote instead of this request's
+            # own, never-persisted device_token.
+            return table.get_item(Key={'user_id': user_id})['Item']
+        raise
+
+
+def get_user_by_id(user_id: str) -> Optional[dict]:
+    """Look up a user by their internal user_id - the same value used as
+    the Flask session identity and the table's primary key."""
+    return table.get_item(Key={'user_id': user_id}).get('Item')
+
+
+def get_user_by_device_token(device_token: str) -> Optional[dict]:
+    """
+    Look up a user by their device token - the lookup path an embedded
+    device actually uses, via the device_token-index GSI rather than the
+    table's primary key.
+
+    Returns:
+        dict or None: the user record, or None if no user has this token.
+    """
+    response = table.query(
+        IndexName='device_token-index',
+        KeyConditionExpression=Key('device_token').eq(device_token),
+    )
+    items = response.get('Items', [])
+    return items[0] if items else None
+
+
+def save_preferences(user_id: str, preferences: list) -> None:
+    """
+    Overwrite a user's saved station/direction preferences.
+
+    Args:
+        user_id (str): as returned in a user record's "user_id" field.
+        preferences (list): up to 3 entries, each
+            {"route": str, "stop": str, "direction": int}.
+    """
+    table.update_item(
+        Key={'user_id': user_id},
+        UpdateExpression='SET preferences = :p',
+        ExpressionAttributeValues={':p': preferences},
+    )

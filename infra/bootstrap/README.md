@@ -38,8 +38,8 @@ Then continue with the rest of the setup in [../README.md](../README.md).
 
 - The role it creates (`transitticker-terraform`) gets AWS's managed
   `*FullAccess` policies for exactly the services this stack uses (EC2/VPC,
-  ELB, ECS, ECR, CloudWatch Logs) - broad within each service, but nowhere
-  near `AdministratorAccess`.
+  ELB, ECS, ECR, CloudWatch Logs, DynamoDB) - broad within each service, but
+  nowhere near `AdministratorAccess`.
 - None of those managed policies grant IAM permissions (AWS deliberately
   excludes IAM from them), so a separate inline policy grants IAM role
   management too - but only for role names starting with `transitticker-`,
@@ -48,3 +48,9 @@ Then continue with the rest of the setup in [../README.md](../README.md).
 - Safe to re-run: every step checks whether its resource already exists
   first, so running it again after adding a new AWS service to the Terraform
   config (and updating the policy list) won't duplicate anything.
+
+**Already ran this before?** `terraform apply` will fail with an access
+denied error on the new `aws_dynamodb_table.users` resource until you re-run
+the script - it now attaches `AmazonDynamoDBFullAccess`, which an earlier run
+wouldn't have granted. Re-running is safe (see above) and only adds the one
+new policy attachment.
