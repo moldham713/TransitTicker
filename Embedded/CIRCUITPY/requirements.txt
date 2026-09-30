@@ -1,0 +1,3 @@
+adafruit_requests
+adafruit_connection_manager
+adafruit_httpserver

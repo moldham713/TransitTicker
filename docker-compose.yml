@@ -11,6 +11,7 @@ services:
       - DYNAMODB_ENDPOINT_URL=http://dynamodb-local:8000
       - AWS_REGION=us-east-1
       - DYNAMODB_TABLE_NAME=transitticker-users
+      - PAIRING_CODES_TABLE_NAME=transitticker-pairing-codes
       # ${VAR} here reads from a .env file next to this one (see
       # .env.example) or your shell environment - never hardcoded, since a
       # Google Client ID is specific to whoever's Google Cloud project this

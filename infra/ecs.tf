@@ -61,20 +61,32 @@ resource "aws_iam_role_policy" "backend_task_dynamodb" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "UsersTableAccess"
-      Effect = "Allow"
-      Action = [
-        "dynamodb:GetItem",
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem",
-        "dynamodb:Query",
-      ]
-      Resource = [
-        aws_dynamodb_table.users.arn,
-        "${aws_dynamodb_table.users.arn}/index/*", # required for Query against the device_token GSI
-      ]
-    }]
+    Statement = [
+      {
+        Sid    = "UsersTableAccess"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+        ]
+        Resource = [
+          aws_dynamodb_table.users.arn,
+          "${aws_dynamodb_table.users.arn}/index/*", # required for Query against the device_token GSI
+        ]
+      },
+      {
+        Sid    = "PairingCodesTableAccess"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+        ]
+        Resource = aws_dynamodb_table.pairing_codes.arn
+      },
+    ]
   })
 }
 
@@ -146,6 +158,10 @@ resource "aws_ecs_task_definition" "backend" {
       {
         name  = "DYNAMODB_TABLE_NAME"
         value = aws_dynamodb_table.users.name
+      },
+      {
+        name  = "PAIRING_CODES_TABLE_NAME"
+        value = aws_dynamodb_table.pairing_codes.name
       },
       {
         name  = "GOOGLE_CLIENT_ID"

@@ -141,12 +141,49 @@
     font-size: 0.8rem;
     background: #1c2740;
   }
-  .device-token {
-    margin-top: 8px;
-    font-size: 0.72rem;
-    color: #5b6577;
+  .device-status {
+    margin-top: 12px;
+  }
+  .device-status .paired {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.8rem;
+    color: #34d399;
+  }
+  .device-status .unlink-device {
+    width: auto;
+    margin-top: 0;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    background: #1c2740;
+  }
+  .device-status .pair-form label {
+    margin: 0 0 6px;
+  }
+  .device-status .pair-row {
+    display: flex;
+    gap: 8px;
+  }
+  .device-status .pair-row input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid #2a3852;
+    background: #0e1626;
+    color: #e6edf3;
+    font-size: 0.95rem;
     font-family: ui-monospace, monospace;
-    word-break: break-all;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .device-status .pair-row button {
+    width: auto;
+    margin-top: 0;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    white-space: nowrap;
   }
   .my-stations {
     margin: 20px 0;
@@ -449,6 +486,47 @@ function App() {
       .finally(() => setUser(null));
   }, []);
 
+  const [pairingCodeInput, setPairingCodeInput] = useState("");
+  const [pairingDevice, setPairingDevice] = useState(false);
+  const [unlinkingDevice, setUnlinkingDevice] = useState(false);
+
+  // Claims a pairing code read off a device's own screen - see
+  // Backend/src/pairing.py. The raw device token itself never appears
+  // here; the response only says whether pairing succeeded.
+  const claimPairingCode = useCallback(() => {
+    if (!pairingCodeInput) return;
+    setPairingDevice(true);
+    fetch(`${BACKEND_URL}/device/pair/claim`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pairing_code: pairingCodeInput }),
+    })
+      .then((res) => {
+        if (!res.ok) return res.json().then((body) => Promise.reject(new Error(body.error || `backend returned ${res.status}`)));
+        return res.json();
+      })
+      .then(() => {
+        setUser((prev) => (prev ? { ...prev, device_paired: true } : prev));
+        setPairingCodeInput("");
+        setError(null);
+      })
+      .catch((err) => setError(`Could not pair device: ${err.message}`))
+      .finally(() => setPairingDevice(false));
+  }, [pairingCodeInput]);
+
+  const unlinkDevice = useCallback(() => {
+    setUnlinkingDevice(true);
+    fetch(`${BACKEND_URL}/device/unlink`, { method: "POST", credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`backend returned ${res.status}`);
+        setUser((prev) => (prev ? { ...prev, device_paired: false } : prev));
+        setError(null);
+      })
+      .catch((err) => setError(`Could not unlink device: ${err.message}`))
+      .finally(() => setUnlinkingDevice(false));
+  }, []);
+
   // Always exactly 3 UI slots, some possibly empty (null) - the backend
   // only ever stores the compact list of filled ones (see savePreferences
   // below), so this pads/truncates whatever comes back from login or
@@ -570,7 +648,32 @@ function App() {
               <span className="who">Signed in</span>
               <button className="sign-out" onClick={signOut}>Sign out</button>
             </div>
-            <div className="device-token">Device token: {user.device_token}</div>
+            <div className="device-status">
+              {user.device_paired ? (
+                <div className="paired">
+                  <span>Device paired</span>
+                  <button className="unlink-device" onClick={unlinkDevice} disabled={unlinkingDevice}>
+                    {unlinkingDevice ? "Unlinking..." : "Unlink device"}
+                  </button>
+                </div>
+              ) : (
+                <div className="pair-form">
+                  <label htmlFor="pairing-code-input">Pair a device</label>
+                  <div className="pair-row">
+                    <input
+                      id="pairing-code-input"
+                      value={pairingCodeInput}
+                      onChange={(e) => setPairingCodeInput(e.target.value.toUpperCase())}
+                      placeholder="Code from device screen"
+                      maxLength={6}
+                    />
+                    <button onClick={claimPairingCode} disabled={pairingDevice || !pairingCodeInput}>
+                      {pairingDevice ? "Pairing..." : "Pair"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <div ref={googleButtonRef}></div>
@@ -581,8 +684,8 @@ function App() {
         <div className="my-stations">
           <h2>My Stations</h2>
           <p className="sub">
-            Saved to your account and served to your embedded device via its
-            device token above.
+            Saved to your account and served to whichever device is paired
+            above.
           </p>
           {[0, 1, 2].map((i) => (
             <StationPicker

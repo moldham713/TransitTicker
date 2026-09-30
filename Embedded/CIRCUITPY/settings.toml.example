@@ -1,0 +1,36 @@
+# Copy to settings.toml at the root of the CIRCUITPY drive.
+#
+# These settings are per-environment, never per-unit: every device built for
+# an environment ships this same file. WiFi credentials and the device token
+# are per-unit and are set on the device itself (setup hotspot + pairing).
+
+# Required. Base URL of the backend, no trailing path.
+#   Local dev: your computer's LAN IP, where docker compose publishes :5000.
+#   Production: the load balancer's address.
+TRANSITTICKER_API_URL = "http://192.168.1.50:5000"
+
+# Seconds between departure polls (10-300). The backend refreshes live data
+# about every 30s, so much faster than this gains nothing.
+# TRANSITTICKER_POLL_SECONDS = 25
+
+# Shown under the pairing code, telling the user where to enter it.
+# Keep it to about 15 characters.
+# TRANSITTICKER_PAIR_HINT = "ON THE WEB APP"
+
+# Panel brightness, 1-100.
+# TRANSITTICKER_BRIGHTNESS = 60
+
+# Panel size. Screens are laid out for 64x32 and centered on larger panels.
+# 64-row panels need the board's Address E jumper soldered.
+# TRANSITTICKER_MATRIX_WIDTH = 64
+# TRANSITTICKER_MATRIX_HEIGHT = 32
+
+# Hardware watchdog (1 = on, 0 = off). Resets the board if the firmware
+# hangs. Set to 0 while working at the REPL.
+# TRANSITTICKER_WATCHDOG = 1
+
+# Development only: join this network directly and skip the setup hotspot.
+# These take priority over WiFi saved on the device. Leave them out of
+# production images. (Setting them also starts CircuitPython's web workflow.)
+# CIRCUITPY_WIFI_SSID = "your-network"
+# CIRCUITPY_WIFI_PASSWORD = "your-password"

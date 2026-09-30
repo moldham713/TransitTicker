@@ -1,7 +1,7 @@
 # Data access layer for user accounts and saved station preferences,
-# backed by DynamoDB. app.py's /auth/* routes call get_or_create_user and
-# get_user_by_id directly; get_user_by_device_token and save_preferences
-# are what the device-facing endpoint and preferences API build on next.
+# backed by DynamoDB. app.py's /auth/* routes use get_or_create_user and
+# get_user_by_id; /preferences uses save_preferences; the /device/* routes
+# use set_device_token, clear_device_token, and get_user_by_device_token.
 #
 # A user's device_token is deliberately not the same value as their
 # user_id: the device_token is what an embedded device presents to the API
@@ -76,16 +76,25 @@ def ensure_table_exists() -> None:
         # Table already exists from a previous run - nothing to do.
 
 
-def _new_device_token() -> str:
-    """A long, random, opaque token unrelated to the user's login identity -
-    see this module's docstring for why that separation matters."""
+def generate_device_token() -> str:
+    """A long, random, opaque token unrelated to a user's login identity -
+    see this module's docstring for why that separation matters. Exposed
+    publicly (not a device_token setter itself) so callers like the
+    pairing-claim flow can generate a candidate token, attempt the claim
+    that actually authorizes it, and only persist it via set_device_token
+    on success - never the other way around."""
     return secrets.token_urlsafe(24)
 
 
 def get_or_create_user(oauth_provider: str, oauth_subject: str) -> dict:
     """
     Look up the user record for a given OAuth identity, creating one with
-    empty preferences and a fresh device token on first login.
+    empty preferences on first login. No device_token is assigned here -
+    an account starts with no device paired at all, and only ever gets one
+    through a successful pairing claim (see pairing.py and app.py's
+    /device/pair/claim route). That keeps "logged in" and "has a paired
+    device" fully independent: signing in never silently issues a
+    credential nobody asked for.
 
     Args:
         oauth_provider (str): e.g. "google".
@@ -94,7 +103,8 @@ def get_or_create_user(oauth_provider: str, oauth_subject: str) -> dict:
 
     Returns:
         dict: the user record - {"user_id", "oauth_provider",
-        "oauth_subject", "device_token", "preferences"}.
+        "oauth_subject", "preferences"}, plus "device_token" once one has
+        been paired.
     """
     user_id = f"{oauth_provider}#{oauth_subject}"
     existing = table.get_item(Key={'user_id': user_id}).get('Item')
@@ -105,22 +115,48 @@ def get_or_create_user(oauth_provider: str, oauth_subject: str) -> dict:
         'user_id': user_id,
         'oauth_provider': oauth_provider,
         'oauth_subject': oauth_subject,
-        'device_token': _new_device_token(),
         'preferences': [],
     }
     try:
         # Only write if this user_id doesn't already exist, so two
-        # concurrent first-logins for the same account can't each generate
-        # a different device_token and overwrite one another.
+        # concurrent first-logins for the same account can't race and
+        # silently discard one request's view of the record.
         table.put_item(Item=new_user, ConditionExpression='attribute_not_exists(user_id)')
         return new_user
     except ClientError as exc:
         if exc.response['Error']['Code'] == 'ConditionalCheckFailedException':
             # Someone else's concurrent request created it a moment ago -
-            # read back what they actually wrote instead of this request's
-            # own, never-persisted device_token.
+            # read back what they actually wrote.
             return table.get_item(Key={'user_id': user_id})['Item']
         raise
+
+
+def set_device_token(user_id: str, device_token: str) -> None:
+    """Store a specific, already-issued device token on a user's record,
+    replacing whatever token (if any) they previously had. Takes the token
+    as a parameter rather than generating one itself, so a caller can
+    generate a candidate token, confirm it via a successful pairing claim,
+    and only persist it here once that's confirmed."""
+    table.update_item(
+        Key={'user_id': user_id},
+        UpdateExpression='SET device_token = :t',
+        ExpressionAttributeValues={':t': device_token},
+    )
+
+
+def clear_device_token(user_id: str) -> None:
+    """Remove a user's device token entirely - self-service "unlink my
+    device": no device can fetch this account's departures until a new one
+    is paired, while saved preferences are untouched, since those belong
+    to the account, not to whichever physical device happens to be reading
+    them. Removing the attribute outright (rather than setting it to an
+    empty string) is also what keeps this user out of the device_token-
+    index GSI - DynamoDB only projects items that have a non-null value
+    for every attribute in a GSI's key schema."""
+    table.update_item(
+        Key={'user_id': user_id},
+        UpdateExpression='REMOVE device_token',
+    )
 
 
 def get_user_by_id(user_id: str) -> Optional[dict]:

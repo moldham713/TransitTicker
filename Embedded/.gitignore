@@ -1,0 +1,5 @@
+# Holds the backend address and, in development, WiFi credentials.
+CIRCUITPY/settings.toml
+# Libraries installed by circup from requirements.txt.
+CIRCUITPY/lib/
+__pycache__/

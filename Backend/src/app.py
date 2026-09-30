@@ -8,8 +8,15 @@ import traceback
 from refresh import refresh_transit_data
 from realtime import refresh_realtime_data
 from getters import get_next_departures, get_routes, get_stops_for_route
-from users import ensure_table_exists, get_or_create_user, get_user_by_id, save_preferences
+from users import (
+    ensure_table_exists, get_or_create_user, get_user_by_id, save_preferences,
+    generate_device_token, set_device_token, clear_device_token, get_user_by_device_token,
+)
 from auth import verify_google_id_token, login_required
+from pairing import (
+    ensure_table_exists as ensure_pairing_table_exists,
+    start_pairing, get_pairing_status, claim_pairing_code,
+)
 
 
 app = Flask(__name__)
@@ -89,11 +96,15 @@ def stops_for_route(route_id):
 
 def _user_response(user: dict) -> dict:
     """The subset of a user record that's safe and useful to hand back to
-    the frontend - never the raw oauth_subject, which isn't needed client-
-    side and has no reason to leave the backend."""
+    the frontend - never the raw oauth_subject, and never the raw
+    device_token either. The web UI only ever needs to know *whether* a
+    device is paired, not its value: the token flows device -> backend ->
+    device during pairing and is never displayed to a human at all, so a
+    browser has no legitimate need to see it, and no way to leak what it
+    never received."""
     return {
         "user_id": user['user_id'],
-        "device_token": user['device_token'],
+        "device_paired": 'device_token' in user,
         "preferences": user.get('preferences', []),
     }
 
@@ -206,6 +217,84 @@ def update_preferences():
     return jsonify({"preferences": result})
 
 
+@app.route('/device/pair/start', methods=['POST'])
+def device_pair_start():
+    """
+    Called by a device with no stored token, to begin pairing. No auth -
+    the device isn't signed in as anyone yet, it's establishing a brand
+    new pairing session that a human will complete from the web UI.
+    """
+    return jsonify(start_pairing())
+
+
+@app.route('/device/pair/status/<pairing_code>', methods=['GET'])
+def device_pair_status(pairing_code):
+    """Polled by the device while its screen shows the pairing code,
+    waiting to learn whether a human has claimed it yet."""
+    return jsonify(get_pairing_status(pairing_code))
+
+
+@app.route('/device/pair/claim', methods=['POST'])
+@login_required
+def device_pair_claim():
+    """
+    Called from the web UI once a signed-in human reads the pairing code
+    off their device's screen and enters it here. Success binds a freshly
+    generated device_token to their account and to that pairing code, for
+    the device to pick up on its next status poll.
+    """
+    body = request.get_json(silent=True) or {}
+    pairing_code = (body.get('pairing_code') or '').strip().upper()
+    if not pairing_code:
+        return jsonify({"error": "pairing_code is required"}), 400
+
+    candidate_token = generate_device_token()
+    if not claim_pairing_code(pairing_code, candidate_token):
+        return jsonify({"error": "invalid, already-claimed, or expired pairing code"}), 400
+
+    # Only reaches the user's account once the pairing_codes table has
+    # confirmed the code was valid, pending, and unexpired - a failed claim
+    # attempt above must never have any side effect on the account.
+    set_device_token(session['user_id'], candidate_token)
+    return jsonify({"status": "paired"})
+
+
+@app.route('/device/unlink', methods=['POST'])
+@login_required
+def device_unlink():
+    """Self-service revoke: the account's current device token stops
+    working immediately. Saved preferences are untouched - pairing a
+    replacement device later picks them right back up."""
+    clear_device_token(session['user_id'])
+    return jsonify({"status": "unlinked"})
+
+
+@app.route('/device/<device_token>', methods=['GET'])
+def device_departures(device_token):
+    """
+    What a paired device actually polls in normal operation: send the
+    token it received during pairing, get back up to 3 departure boards
+    for whichever stations are currently saved on the account it's bound
+    to - no route/stop/direction parameters needed, unlike the / endpoint.
+    """
+    user = get_user_by_device_token(device_token)
+    if not user:
+        # Wrong, unlinked, or never-claimed token. The device's own logic
+        # should treat this as "not paired" and fall back to
+        # POST /device/pair/start for a fresh code, rather than retrying
+        # this same token indefinitely.
+        return jsonify({"error": "unknown device token"}), 401
+
+    boards = []
+    with transit_data_lock, realtime_data_lock:
+        for pref in user.get('preferences', []):
+            boards.append(get_next_departures(
+                pref['route'], pref['stop'], pref['direction'],
+                transit_data, realtime_data, count=3,
+            ))
+    return jsonify({"boards": boards})
+
+
 def run_scheduler() -> None:
     """Background loop that actually executes jobs registered with `schedule`.
 
@@ -232,9 +321,11 @@ def run_scheduler() -> None:
 
 if __name__ == '__main__':
     # No-ops in production - see users.py's docstring. In local dev, creates
-    # the users table against DynamoDB Local on first run, since nothing
-    # else provisions it there the way Terraform does for the real table.
+    # the users and pairing-codes tables against DynamoDB Local on first
+    # run, since nothing else provisions them there the way Terraform does
+    # for the real tables.
     ensure_table_exists()
+    ensure_pairing_table_exists()
 
     if not refresh_transit_data(data=transit_data, lock=transit_data_lock):
         print("WARNING: initial transit data load failed; serving no data until the next scheduled refresh succeeds.")
