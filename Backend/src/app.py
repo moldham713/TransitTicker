@@ -332,10 +332,14 @@ def device_departures(device_token):
     boards = []
     with transit_data_lock, realtime_data_lock:
         for pref in user.get('preferences', []):
-            boards.append(get_next_departures(
+            board = get_next_departures(
                 pref['route'], pref['stop'], pref['direction'],
                 transit_data, realtime_data, count=3,
-            ))
+            )
+            # The device draws each row's marker as this route's colored
+            # bullet (Embedded/CIRCUITPY/transitticker/render.py).
+            board['route'] = pref['route']
+            boards.append(board)
     return jsonify({"boards": boards})
 
 

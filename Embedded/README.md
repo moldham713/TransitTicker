@@ -134,7 +134,8 @@ before goes down, it keeps retrying without asking again.
 
 ### The departures screen
 
-One row per saved station (up to 3), then up to 3 departures as minutes away:
+One row per saved station (up to 3), led by that route's colored bullet, then
+up to 3 departures as minutes away:
 
 - **Amber number + green dot**: a live, real-time-tracked train.
 - **Dim blue-white number, no dot**: a static-schedule estimate.
@@ -170,10 +171,6 @@ ESP32-S3 ROM bootloader.
   and every module compiles. The hardware glue (`display.py`, `network.py`,
   `portal.py`, `reset.py`, `app.py`) follows Adafruit's documented APIs but still
   needs a first run on a real board.
-- **Rows aren't labelled.** The backend's `/device/<token>` boards contain only
-  `departures`, so rows are numbered 1–3 in saved order. If the backend adds
-  `"route": "Q"` to each board, the marker becomes that route's colored bullet
-  with no firmware change (see `departures.py` / `render.py`).
 - Minutes above 99 display as `99`.
 - The setup portal has no captive-portal DNS, so users type `192.168.4.1`
   themselves (it's shown on the matrix).

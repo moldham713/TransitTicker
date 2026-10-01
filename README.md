@@ -195,8 +195,9 @@ curl "http://localhost:5000/?route=Q&stop=Q05&direction=1&count=3"
 }
 ```
 
-`GET /device/<device_token>` returns one of these per saved station:
-`{"boards": [{"departures": [...]}, ...]}`.
+`GET /device/<device_token>` returns one board per saved station, in saved
+order, each tagged with its route:
+`{"boards": [{"route": "Q", "departures": [...]}, ...]}`.
 
 `is_realtime` marks a live-tracked prediction, as opposed to a static
 schedule time. MTA only tracks trips actively en route, so the soonest one

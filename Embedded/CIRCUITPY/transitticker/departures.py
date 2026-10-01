@@ -45,9 +45,9 @@ def build_rows(boards, elapsed_ms):
             departures.append((minutes, departure.get("is_realtime") is True))
             if len(departures) == MAX_DEPARTURES:
                 break
-        # The backend's boards currently carry no route or station label.
-        # When one appears as "route", the row marker shows that route's
-        # bullet; until then rows are numbered in saved order.
+        # Each board carries its saved "route", which the row marker shows
+        # as that route's bullet. A board without one falls back to a
+        # numbered marker in saved order.
         route = board.get("route")
         rows.append({
             "route": route if isinstance(route, str) and route else None,
