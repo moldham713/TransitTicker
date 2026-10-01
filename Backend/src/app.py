@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from botocore.exceptions import BotoCoreError
+from waitress import serve
 import schedule
 import threading
 import time
@@ -47,6 +48,16 @@ FRONTEND_ORIGINS = [
     if origin.strip()
 ]
 CORS(app, supports_credentials=True, origins=FRONTEND_ORIGINS)
+
+
+@app.after_request
+def log_request(response):
+    """One access-log line per request (Waitress doesn't write these
+    itself). Logs the matched route pattern, e.g. /device/<device_token>,
+    so the device token in that URL never ends up in the logs."""
+    route = request.url_rule.rule if request.url_rule else request.path
+    print(f"{request.method} {route} {response.status_code}")
+    return response
 
 
 @app.errorhandler(BotoCoreError)
@@ -407,11 +418,19 @@ if __name__ == '__main__':
     scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
     scheduler_thread.start()
 
-    # Debug mode (Werkzeug debugger + reloader) must stay off in the container:
-    # the debugger allows arbitrary code execution if the port is ever exposed,
-    # and the reloader would spawn a second process that re-runs the startup
-    # refresh and starts a second scheduler thread. Opt in only for local dev
-    # via FLASK_DEBUG=1, and keep the reloader off either way since startup
-    # refresh/scheduling here isn't reloader-safe.
-    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
-    app.run(host='0.0.0.0', debug=debug_mode, use_reloader=False)
+    # Waitress serves the app: one process with a thread pool. A single
+    # process matters here - all transit data lives in this process's memory
+    # and is refreshed by the scheduler thread started above, so a
+    # multi-process server would hold one copy of the schedule per worker
+    # and never run this startup block in any of them.
+    #
+    # FLASK_DEBUG=1 switches to Flask's own development server with the
+    # Werkzeug debugger, for local debugging only: the debugger allows
+    # arbitrary code execution, so it must never run where the port is
+    # reachable by anyone else. The reloader stays off either way, since it
+    # would start a second process that repeats the startup refresh and
+    # scheduler.
+    if os.environ.get('FLASK_DEBUG', '0') == '1':
+        app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+    else:
+        serve(app, host='0.0.0.0', port=5000, threads=8)

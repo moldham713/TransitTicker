@@ -55,11 +55,6 @@
     font-weight: 500;
     letter-spacing: -0.01em;
   }
-  .masthead p {
-    margin: 0;
-    font-size: 15px;
-    color: #b5b5b5;
-  }
 
   .light {
     min-height: 100vh;
@@ -392,7 +387,7 @@
 </script>
 
 <!-- No-build-step React setup: UMD builds + in-browser JSX transform.
-     Fine for a small simulator UI.
+     Fine for a single-page UI this size.
 
      @babel/standalone is pinned to an exact version (7.29.0, the last Babel 7
      release - https://babeljs.io/blog/2026/01/31/7.29.0). An unversioned
@@ -612,7 +607,6 @@ function Masthead() {
     <header className="sign masthead">
       <div className="masthead-inner">
         <h1>TransitTicker</h1>
-        <p>Departure board simulator</p>
       </div>
     </header>
   );
@@ -774,17 +768,11 @@ function App() {
   const [preferences, setPreferences] = useState([null, null, null]);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [preferencesSaved, setPreferencesSaved] = useState(false);
-  // One departures preview per slot, populated only after that slot has
-  // actually been saved. Stays null for an edited-but-unsaved slot, so a
-  // preview only ever reflects a selection that's been persisted.
+  // One departures preview per slot, populated only for slots that are
+  // saved: ones loaded from the account at sign-in, or ones just saved.
+  // Stays null for an edited-but-unsaved slot, so a preview only ever
+  // reflects a selection that's been persisted.
   const [previews, setPreviews] = useState([null, null, null]);
-
-  useEffect(() => {
-    const saved = (user && user.preferences) || [];
-    setPreferences([saved[0] || null, saved[1] || null, saved[2] || null]);
-    setPreferencesSaved(false);
-    setPreviews([null, null, null]);
-  }, [user]);
 
   const updateSlot = useCallback((index, value) => {
     setPreferences((prev) => {
@@ -826,6 +814,28 @@ function App() {
       })
       .catch((err) => setError(`Could not preview station ${index + 1}: ${err.message}`));
   }, []);
+
+  // Loads the account's saved stations into the three slots and fetches a
+  // live preview for each, so a returning user sees departures right away.
+  // Keyed on the account ID, not the whole user object: pairing or
+  // unlinking a device updates `user` too, and that must not reset slots
+  // edited or saved since sign-in.
+  const userId = user ? user.user_id : null;
+  useEffect(() => {
+    const saved = ((user && user.preferences) || []).map((pref) => ({
+      route: String(pref.route),
+      stop: String(pref.stop),
+      // The <select>s and /preferences validation both need a number
+      direction: Number(pref.direction),
+    }));
+    const slots = [saved[0] || null, saved[1] || null, saved[2] || null];
+    setPreferences(slots);
+    setPreferencesSaved(false);
+    setPreviews([null, null, null]);
+    slots.forEach((pref, i) => {
+      if (pref) fetchPreview(i, pref);
+    });
+  }, [userId, fetchPreview]);
 
   const savePreferences = useCallback(() => {
     setSavingPreferences(true);

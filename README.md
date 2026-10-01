@@ -1,10 +1,10 @@
 # TransitTicker
 
 A live NYC subway departure board, built to drive a small physical
-countdown display. Sign in, pick up to three stations, and TransitTicker
-serves the next few departures for each one - blending MTA's real-time
-predictions with the static schedule as a fallback - to a paired device
-or to the browser-based simulator.
+countdown display. Sign in on the web app, pick up to three stations, and
+TransitTicker serves the next few departures for each one to your paired
+display - blending MTA's real-time predictions with the static schedule as
+a fallback.
 
 [![Python](https://img.shields.io/badge/python-3.9-3776AB?logo=python&logoColor=white)](Backend)
 [![Flask](https://img.shields.io/badge/flask-API-black?logo=flask&logoColor=white)](Backend/src/app.py)

@@ -1,4 +1,5 @@
 from flask import Flask, send_from_directory, Response
+from waitress import serve
 import os
 
 app = Flask(__name__)
@@ -35,4 +36,4 @@ def index():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001)
+    serve(app, host='0.0.0.0', port=5001)

@@ -76,6 +76,26 @@ def ensure_table_exists() -> None:
         # Table already exists from a previous run - nothing to do.
 
 
+def _normalize_user(item: Optional[dict]) -> Optional[dict]:
+    """
+    Convert a user record read from DynamoDB into plain Python types.
+
+    boto3 returns every DynamoDB number as decimal.Decimal, and Flask's JSON
+    encoder serializes Decimal as a string. Left as-is, a saved direction of
+    1 reaches the browser as "1", and the browser then sends that string
+    back on the next save, where /preferences validation rejects it. Every
+    read path in this module returns records through here so callers only
+    ever see an int direction.
+    """
+    if not item:
+        return item
+    item['preferences'] = [
+        {**pref, 'direction': int(pref['direction'])}
+        for pref in item.get('preferences', [])
+    ]
+    return item
+
+
 def generate_device_token() -> str:
     """A long, random, opaque token unrelated to a user's login identity -
     see this module's docstring for why that separation matters. Exposed
@@ -109,7 +129,7 @@ def get_or_create_user(oauth_provider: str, oauth_subject: str) -> dict:
     user_id = f"{oauth_provider}#{oauth_subject}"
     existing = table.get_item(Key={'user_id': user_id}).get('Item')
     if existing:
-        return existing
+        return _normalize_user(existing)
 
     new_user = {
         'user_id': user_id,
@@ -127,7 +147,7 @@ def get_or_create_user(oauth_provider: str, oauth_subject: str) -> dict:
         if exc.response['Error']['Code'] == 'ConditionalCheckFailedException':
             # Someone else's concurrent request created it a moment ago -
             # read back what they actually wrote.
-            return table.get_item(Key={'user_id': user_id})['Item']
+            return _normalize_user(table.get_item(Key={'user_id': user_id})['Item'])
         raise
 
 
@@ -162,7 +182,7 @@ def clear_device_token(user_id: str) -> None:
 def get_user_by_id(user_id: str) -> Optional[dict]:
     """Look up a user by their internal user_id - the same value used as
     the Flask session identity and the table's primary key."""
-    return table.get_item(Key={'user_id': user_id}).get('Item')
+    return _normalize_user(table.get_item(Key={'user_id': user_id}).get('Item'))
 
 
 def get_user_by_device_token(device_token: str) -> Optional[dict]:
@@ -179,7 +199,7 @@ def get_user_by_device_token(device_token: str) -> Optional[dict]:
         KeyConditionExpression=Key('device_token').eq(device_token),
     )
     items = response.get('Items', [])
-    return items[0] if items else None
+    return _normalize_user(items[0]) if items else None
 
 
 def save_preferences(user_id: str, preferences: list) -> None:

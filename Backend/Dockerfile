@@ -20,6 +20,7 @@ RUN pip install schedule
 RUN pip install gtfs-realtime-bindings
 RUN pip install boto3
 RUN pip install google-auth
+RUN pip install waitress
 
 # Set the timezone environment variable
 ENV TZ="America/New_York"

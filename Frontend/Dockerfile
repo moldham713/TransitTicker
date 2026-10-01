@@ -13,6 +13,7 @@ COPY static ./static
 
 # Install dependencies
 RUN pip install flask
+RUN pip install waitress
 
 # The backend URL the browser should call - override at `docker run` time
 # with -e BACKEND_API_URL=http://<host-reachable-backend>:5000 if the backend
