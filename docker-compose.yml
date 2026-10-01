@@ -20,7 +20,10 @@ services:
       # committed file either way.
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:-local-dev-secret-not-for-production}
-      - FRONTEND_ORIGIN=http://localhost:5001
+      # Both accepted, not just one - see the comment on FRONTEND_ORIGINS in
+      # Backend/src/app.py for why "localhost" and "127.0.0.1" both need to
+      # work here for local dev specifically.
+      - FRONTEND_ORIGIN=http://localhost:5001,http://127.0.0.1:5001
     depends_on:
       - dynamodb-local
 

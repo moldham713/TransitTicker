@@ -47,7 +47,7 @@
   }
   button:disabled { background: #2a3852; cursor: not-allowed; }
   .departures {
-    margin-top: 20px;
+    margin-top: 12px;
     border-radius: 8px;
     background: #0e1626;
     border: 1px solid #223049;
@@ -185,11 +185,6 @@
     font-size: 0.85rem;
     white-space: nowrap;
   }
-  .my-stations {
-    margin: 20px 0;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #223049;
-  }
   .my-stations h2 {
     font-size: 0.95rem;
     margin: 0 0 2px;
@@ -197,9 +192,11 @@
   .my-stations .sub {
     margin: 0 0 16px;
   }
+  .station-slot {
+    margin-bottom: 16px;
+  }
   .slot {
     padding: 12px;
-    margin-bottom: 10px;
     border: 1px solid #223049;
     border-radius: 8px;
     background: #0e1626;
@@ -224,10 +221,6 @@
     padding: 5px 10px;
     font-size: 0.75rem;
     background: #1c2740;
-  }
-  .section-heading {
-    font-size: 0.95rem;
-    margin: 0 0 16px;
   }
   .boot-status {
     color: #8b96a8;
@@ -329,10 +322,9 @@ const DIRECTIONS = [
 ];
 
 // One saved-station slot: its own route/stop/direction pickers, reusing
-// the same /routes/<id>/stops lookup the main departure board uses. Kept
-// as a separate component (rather than inlined 3 times in App) so each
-// slot's own "stops for this route" fetch and loading state stay isolated
-// from the other two slots.
+// the same /routes/<id>/stops lookup. Kept as a separate component (rather
+// than inlined 3 times in App) so each slot's own "stops for this route"
+// fetch and loading state stay isolated from the other two slots.
 function StationPicker({ label, routes, value, onChange }) {
   const [stops, setStops] = useState([]);
   const [loadingStops, setLoadingStops] = useState(false);
@@ -401,16 +393,33 @@ function StationPicker({ label, routes, value, onChange }) {
   );
 }
 
+// Renders a list of departures exactly like a small platform countdown
+// clock would - reused for every saved station's live preview.
+function DeparturesBoard({ departures }) {
+  return (
+    <div className="departures">
+      {departures && departures.length > 0 ? (
+        departures.map((d, i) => (
+          <div className="departure-row" key={i}>
+            <span className="left">
+              <span className="minutes">{d.minutes_away} min</span>
+              {d.is_realtime ? (
+                <span className="live-badge">Live</span>
+              ) : (
+                <span className="scheduled-badge">Scheduled</span>
+              )}
+            </span>
+            <span className="time">{d.departure_time}</span>
+          </div>
+        ))
+      ) : (
+        <div className="empty">No upcoming departures found for this station.</div>
+      )}
+    </div>
+  );
+}
+
 function App() {
-  const [routes, setRoutes] = useState([]);
-  const [stops, setStops] = useState([]);
-  const [route, setRoute] = useState("");
-  const [stop, setStop] = useState("");
-  const [direction, setDirection] = useState(1);
-  const [result, setResult] = useState(null);
-  const [loadingRoutes, setLoadingRoutes] = useState(true);
-  const [loadingStops, setLoadingStops] = useState(false);
-  const [loadingResult, setLoadingResult] = useState(false);
   const [error, setError] = useState(null);
 
   const [user, setUser] = useState(null);
@@ -419,9 +428,9 @@ function App() {
 
   // On mount, see if a session cookie from a previous visit is still valid
   // (credentials: "include" is required for the browser to send it at all
-  // on a cross-origin request), so returning users don't have to sign in
-  // again every time. A 401 here just means "not currently signed in" -
-  // not an error worth surfacing to the user.
+  // on a cross-origin request). Nothing else in the app - the route list,
+  // saved stations, anything - loads before this resolves: signing in is a
+  // hard prerequisite for the rest of the page, not an optional step.
   useEffect(() => {
     fetch(`${BACKEND_URL}/auth/me`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : null))
@@ -527,6 +536,26 @@ function App() {
       .finally(() => setUnlinkingDevice(false));
   }, []);
 
+  // Route list for the station pickers - only fetched once signed in,
+  // never before. This is what used to fire unconditionally on page load;
+  // gating it on `user` is what actually enforces "sign in is step one"
+  // for the whole page, not just for saving.
+  const [routes, setRoutes] = useState([]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetch(`${BACKEND_URL}/routes`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`backend returned ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        setRoutes(data);
+        setError(null);
+      })
+      .catch((err) => setError(`Could not load routes from ${BACKEND_URL}: ${err.message}`));
+  }, [user]);
+
   // Always exactly 3 UI slots, some possibly empty (null) - the backend
   // only ever stores the compact list of filled ones (see savePreferences
   // below), so this pads/truncates whatever comes back from login or
@@ -534,11 +563,17 @@ function App() {
   const [preferences, setPreferences] = useState([null, null, null]);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [preferencesSaved, setPreferencesSaved] = useState(false);
+  // One departures preview per slot, populated only after that slot has
+  // actually been saved - see savePreferences. Stays null for an edited-
+  // but-not-yet-saved slot, so a preview never shows stale data standing
+  // in for a change that hasn't been persisted yet.
+  const [previews, setPreviews] = useState([null, null, null]);
 
   useEffect(() => {
     const saved = (user && user.preferences) || [];
     setPreferences([saved[0] || null, saved[1] || null, saved[2] || null]);
     setPreferencesSaved(false);
+    setPreviews([null, null, null]);
   }, [user]);
 
   const updateSlot = useCallback((index, value) => {
@@ -548,6 +583,39 @@ function App() {
       return next;
     });
     setPreferencesSaved(false);
+    setPreviews((prev) => {
+      const next = prev.slice();
+      next[index] = null;
+      return next;
+    });
+  }, []);
+
+  const DEPARTURE_COUNT = 3; // matches a small embedded display's line count
+
+  // Fetches a live preview for one saved slot, via the same public /
+  // endpoint the backend (and eventually a paired device) itself reads
+  // from - this is the "simulate the backend behavior" step, and
+  // deliberately doesn't require a device to be paired to see it.
+  const fetchPreview = useCallback((index, pref) => {
+    const params = new URLSearchParams({
+      route: pref.route,
+      stop: pref.stop,
+      direction: String(pref.direction),
+      count: String(DEPARTURE_COUNT),
+    });
+    fetch(`${BACKEND_URL}/?${params.toString()}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`backend returned ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        setPreviews((prev) => {
+          const next = prev.slice();
+          next[index] = data.departures || [];
+          return next;
+        });
+      })
+      .catch((err) => setError(`Could not preview station ${index + 1}: ${err.message}`));
   }, []);
 
   const savePreferences = useCallback(() => {
@@ -568,73 +636,48 @@ function App() {
       .then(() => {
         setPreferencesSaved(true);
         setError(null);
+        preferences.forEach((pref, i) => {
+          if (pref) fetchPreview(i, pref);
+        });
       })
       .catch((err) => setError(`Could not save stations: ${err.message}`))
       .finally(() => setSavingPreferences(false));
-  }, [preferences]);
+  }, [preferences, fetchPreview]);
 
-  // Load the route list once on mount.
+  // Keeps every currently-shown preview live, re-fetching on the same
+  // 30-second cadence the backend's own real-time data refreshes on (see
+  // Backend/src/app.py) - polling more often than that would just repeat
+  // the same server-side data. Only refreshes slots that already have a
+  // preview showing (i.e. have actually been saved), never a slot mid-edit
+  // with no preview yet - same rule fetchPreview's callers already follow.
   useEffect(() => {
-    setLoadingRoutes(true);
-    fetch(`${BACKEND_URL}/routes`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`backend returned ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setRoutes(data);
-        setError(null);
-      })
-      .catch((err) => setError(`Could not load routes from ${BACKEND_URL}: ${err.message}`))
-      .finally(() => setLoadingRoutes(false));
-  }, []);
+    const interval = setInterval(() => {
+      preferences.forEach((pref, i) => {
+        if (pref && previews[i]) fetchPreview(i, pref);
+      });
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [preferences, previews, fetchPreview]);
 
-  // Re-load the stop list whenever the chosen route changes.
-  useEffect(() => {
-    setStop("");
-    setResult(null);
-    if (!route) {
-      setStops([]);
-      return;
-    }
-    setLoadingStops(true);
-    fetch(`${BACKEND_URL}/routes/${encodeURIComponent(route)}/stops`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`backend returned ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setStops(data);
-        setError(null);
-      })
-      .catch((err) => setError(`Could not load stops for route ${route}: ${err.message}`))
-      .finally(() => setLoadingStops(false));
-  }, [route]);
+  if (!authChecked) {
+    return (
+      <div className="card">
+        <h1>TransitTicker</h1>
+        <p className="sub boot-status">Checking sign-in status...</p>
+      </div>
+    );
+  }
 
-  const DEPARTURE_COUNT = 3; // matches a small embedded display's line count
-
-  const fetchDepartures = useCallback(() => {
-    if (!route || !stop) return;
-    setLoadingResult(true);
-    setResult(null);
-    const params = new URLSearchParams({
-      route,
-      stop,
-      direction: String(direction),
-      count: String(DEPARTURE_COUNT),
-    });
-    fetch(`${BACKEND_URL}/?${params.toString()}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`backend returned ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setResult(data);
-        setError(null);
-      })
-      .catch((err) => setError(`Could not fetch departures: ${err.message}`))
-      .finally(() => setLoadingResult(false));
-  }, [route, stop, direction]);
+  if (!user) {
+    return (
+      <div className="card">
+        <h1>TransitTicker</h1>
+        <p className="sub">Sign in to set the stations your ticker tracks.</p>
+        <div ref={googleButtonRef}></div>
+        {error && <div className="error">{error}</div>}
+      </div>
+    );
+  }
 
   return (
     <div className="card">
@@ -642,134 +685,61 @@ function App() {
       <p className="sub">Embedded display simulator</p>
 
       <div className="auth-bar">
-        {user ? (
-          <div>
-            <div className="signed-in">
-              <span className="who">Signed in</span>
-              <button className="sign-out" onClick={signOut}>Sign out</button>
+        <div className="signed-in">
+          <span className="who">Signed in</span>
+          <button className="sign-out" onClick={signOut}>Sign out</button>
+        </div>
+        <div className="device-status">
+          {user.device_paired ? (
+            <div className="paired">
+              <span>Device paired</span>
+              <button className="unlink-device" onClick={unlinkDevice} disabled={unlinkingDevice}>
+                {unlinkingDevice ? "Unlinking..." : "Unlink device"}
+              </button>
             </div>
-            <div className="device-status">
-              {user.device_paired ? (
-                <div className="paired">
-                  <span>Device paired</span>
-                  <button className="unlink-device" onClick={unlinkDevice} disabled={unlinkingDevice}>
-                    {unlinkingDevice ? "Unlinking..." : "Unlink device"}
-                  </button>
-                </div>
-              ) : (
-                <div className="pair-form">
-                  <label htmlFor="pairing-code-input">Pair a device</label>
-                  <div className="pair-row">
-                    <input
-                      id="pairing-code-input"
-                      value={pairingCodeInput}
-                      onChange={(e) => setPairingCodeInput(e.target.value.toUpperCase())}
-                      placeholder="Code from device screen"
-                      maxLength={6}
-                    />
-                    <button onClick={claimPairingCode} disabled={pairingDevice || !pairingCodeInput}>
-                      {pairingDevice ? "Pairing..." : "Pair"}
-                    </button>
-                  </div>
-                </div>
-              )}
+          ) : (
+            <div className="pair-form">
+              <label htmlFor="pairing-code-input">Pair a device</label>
+              <div className="pair-row">
+                <input
+                  id="pairing-code-input"
+                  value={pairingCodeInput}
+                  onChange={(e) => setPairingCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Code from device screen"
+                  maxLength={6}
+                />
+                <button onClick={claimPairingCode} disabled={pairingDevice || !pairingCodeInput}>
+                  {pairingDevice ? "Pairing..." : "Pair"}
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div ref={googleButtonRef}></div>
-        )}
+          )}
+        </div>
       </div>
 
-      {user && (
-        <div className="my-stations">
-          <h2>My Stations</h2>
-          <p className="sub">
-            Saved to your account and served to whichever device is paired
-            above.
-          </p>
-          {[0, 1, 2].map((i) => (
+      <div className="my-stations">
+        <h2>My Stations</h2>
+        <p className="sub">
+          Pick up to 3 stations and save them - each one previews live below
+          once saved, the same data your paired device would show.
+        </p>
+        {[0, 1, 2].map((i) => (
+          <div className="station-slot" key={i}>
             <StationPicker
-              key={i}
               label={`Station ${i + 1}`}
               routes={routes}
               value={preferences[i]}
               onChange={(v) => updateSlot(i, v)}
             />
-          ))}
-          <button onClick={savePreferences} disabled={savingPreferences}>
-            {savingPreferences ? "Saving..." : preferencesSaved ? "Saved" : "Save My Stations"}
-          </button>
-        </div>
-      )}
-
-      <h2 className="section-heading">Quick Lookup</h2>
-
-      <label htmlFor="route-select">Route</label>
-      <select
-        id="route-select"
-        value={route}
-        onChange={(e) => setRoute(e.target.value)}
-        disabled={loadingRoutes}
-      >
-        <option value="">{loadingRoutes ? "Loading routes..." : "Select a route"}</option>
-        {routes.map((r) => (
-          <option key={r} value={r}>{r}</option>
+            {previews[i] && <DeparturesBoard departures={previews[i]} />}
+          </div>
         ))}
-      </select>
-
-      <label htmlFor="stop-select">Stop</label>
-      <select
-        id="stop-select"
-        value={stop}
-        onChange={(e) => setStop(e.target.value)}
-        disabled={!route || loadingStops}
-      >
-        <option value="">
-          {!route ? "Select a route first" : loadingStops ? "Loading stops..." : "Select a stop"}
-        </option>
-        {stops.map((s) => (
-          <option key={s.stop_id} value={s.stop_id}>{s.stop_name}</option>
-        ))}
-      </select>
-
-      <label htmlFor="direction-select">Direction</label>
-      <select
-        id="direction-select"
-        value={direction}
-        onChange={(e) => setDirection(Number(e.target.value))}
-      >
-        {DIRECTIONS.map((d) => (
-          <option key={d.value} value={d.value}>{d.label}</option>
-        ))}
-      </select>
-
-      <button onClick={fetchDepartures} disabled={!route || !stop || loadingResult}>
-        {loadingResult ? "Checking..." : `Get Next ${DEPARTURE_COUNT} Departures`}
-      </button>
+        <button onClick={savePreferences} disabled={savingPreferences}>
+          {savingPreferences ? "Saving..." : preferencesSaved ? "Saved" : "Save My Stations"}
+        </button>
+      </div>
 
       {error && <div className="error">{error}</div>}
-
-      {result && (
-        <div className="departures">
-          {result.departures && result.departures.length > 0 ? (
-            result.departures.map((d, i) => (
-              <div className="departure-row" key={i}>
-                <span className="left">
-                  <span className="minutes">{d.minutes_away} min</span>
-                  {d.is_realtime ? (
-                    <span className="live-badge">Live</span>
-                  ) : (
-                    <span className="scheduled-badge">Scheduled</span>
-                  )}
-                </span>
-                <span className="time">{d.departure_time}</span>
-              </div>
-            ))
-          ) : (
-            <div className="empty">No upcoming departures found for this selection.</div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

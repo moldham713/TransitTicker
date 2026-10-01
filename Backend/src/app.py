@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
+from botocore.exceptions import BotoCoreError
 import schedule
 import threading
 import time
@@ -28,12 +29,44 @@ app.secret_key = os.environ.get('SESSION_SECRET_KEY', 'local-dev-secret-not-for-
 
 # The React frontend runs in the browser as its own origin (a separate
 # container/port), so it needs CORS enabled here to be allowed to call this
-# API directly with fetch(). supports_credentials + a specific origin
+# API directly with fetch(). supports_credentials + explicit origins
 # (rather than "*") is required for the session cookie /auth/* sets to be
 # sent on cross-origin requests at all - browsers reject the combination of
 # a wildcard origin with credentialed requests outright.
-FRONTEND_ORIGIN = os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5001')
-CORS(app, supports_credentials=True, origins=[FRONTEND_ORIGIN])
+#
+# A comma-separated list, not a single value: "localhost" and "127.0.0.1"
+# are different origins as far as both CORS and Google OAuth are concerned,
+# even though they reach the same machine - Docker Desktop's own UI
+# commonly links to 127.0.0.1 rather than localhost, so local dev needs
+# both accepted rather than whichever one happens to be typed. Production
+# only ever needs the one real ALB origin, so this still works fine there
+# as a single-item list.
+FRONTEND_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('FRONTEND_ORIGIN', 'http://localhost:5001').split(',')
+    if origin.strip()
+]
+CORS(app, supports_credentials=True, origins=FRONTEND_ORIGINS)
+
+
+@app.errorhandler(BotoCoreError)
+def handle_dynamodb_connection_error(exc):
+    """
+    Covers connection-level DynamoDB failures (EndpointConnectionError and
+    the like - BotoCoreError is the base for botocore's own client-side/
+    transport errors, distinct from ClientError, which is a response an
+    AWS service actually returned). Applies globally to every route that
+    touches DynamoDB, rather than wrapping each one individually.
+
+    Without this, a transient DynamoDB outage (real AWS having a bad
+    moment, or DynamoDB Local's container becoming unreachable mid-session
+    in local dev) surfaces as a bare 500 with a raw traceback - useful in
+    the backend's own logs, but the caller only ever sees "backend
+    returned 500", with nothing to say the database specifically is the
+    problem rather than the application itself.
+    """
+    print(f"ERROR: DynamoDB request failed: {exc}")
+    return jsonify({"error": "temporarily unable to reach the database - please try again shortly"}), 503
 
 transit_data = {}
 # Guards transit_data during the brief swap in refresh_transit_data, and during
@@ -295,6 +328,40 @@ def device_departures(device_token):
     return jsonify({"boards": boards})
 
 
+def _wait_for_dynamodb_local(timeout_seconds: int = 30) -> None:
+    """
+    Local dev only: DynamoDB Local is a JVM process that takes a few
+    seconds to finish starting and bind its port after its container
+    starts, and Compose's `depends_on` on its own only guarantees this
+    container was told to start first - not that it's actually ready to
+    accept connections by the time the backend's own startup code runs.
+    Retries table creation until it succeeds or this timeout elapses,
+    rather than letting one early, transient connection failure crash the
+    whole backend on startup.
+
+    A no-op in production: DYNAMODB_ENDPOINT_URL is unset there, so this
+    returns immediately without retrying anything, and boto3 talks to the
+    real, already-running AWS service instead.
+    """
+    if not os.environ.get('DYNAMODB_ENDPOINT_URL'):
+        ensure_table_exists()
+        ensure_pairing_table_exists()
+        return
+
+    deadline = time.time() + timeout_seconds
+    while True:
+        try:
+            ensure_table_exists()
+            ensure_pairing_table_exists()
+            return
+        except Exception as exc:
+            if time.time() >= deadline:
+                print(f"WARNING: DynamoDB Local still unreachable after {timeout_seconds}s, continuing anyway: {exc}")
+                return
+            print("Waiting for DynamoDB Local to finish starting...")
+            time.sleep(1)
+
+
 def run_scheduler() -> None:
     """Background loop that actually executes jobs registered with `schedule`.
 
@@ -320,12 +387,10 @@ def run_scheduler() -> None:
 
 
 if __name__ == '__main__':
-    # No-ops in production - see users.py's docstring. In local dev, creates
-    # the users and pairing-codes tables against DynamoDB Local on first
-    # run, since nothing else provisions them there the way Terraform does
-    # for the real tables.
-    ensure_table_exists()
-    ensure_pairing_table_exists()
+    # In production this runs once and returns immediately (no-op tables -
+    # see users.py's docstring). In local dev, retries against DynamoDB
+    # Local until it's actually up - see _wait_for_dynamodb_local.
+    _wait_for_dynamodb_local()
 
     if not refresh_transit_data(data=transit_data, lock=transit_data_lock):
         print("WARNING: initial transit data load failed; serving no data until the next scheduled refresh succeeds.")
