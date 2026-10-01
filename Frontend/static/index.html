@@ -3,252 +3,360 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>TransitTicker Simulator</title>
+<title>TransitTicker</title>
 <style>
+  /* Visual language follows the 1970 NYCTA Graphics Standards Manual
+     (Unimark / Vignelli & Noorda): Helvetica, white type on black sign
+     panels, a thin white rule across the top of every sign, colored
+     circular route symbols, and a strict square-cornered grid. */
   * { box-sizing: border-box; }
+  /* Black by default, so loading, checking and sign-in all sit on one
+     continuous black screen; the signed-in page paints its own light
+     background via .light. */
   body {
     margin: 0;
+    background: #000;
+    color: #fff;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 500;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- Sign panel: the core GSM element ---- */
+  .sign {
+    position: relative;
+    background: #000;
+    color: #fff;
+    padding: 26px 20px 18px;
+  }
+  .sign::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 10px;
+    height: 2px;
+    background: #fff;
+  }
+
+  /* ---- Masthead ---- */
+  .masthead { padding: 30px 32px 22px; }
+  .masthead-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .masthead h1 {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .masthead p {
+    margin: 0;
+    font-size: 15px;
+    color: #b5b5b5;
+  }
+
+  .light {
     min-height: 100vh;
+    background: #f4f4f1;
+    color: #111;
+  }
+  .page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px;
+  }
+
+  /* ---- Route symbols ---- */
+  .bullet {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .bullet.large { width: 46px; height: 46px; font-size: 27px; }
+  .bullet.long .bullet-label { font-size: 0.55em; }
+  /* Express service is a diamond on MTA signage */
+  .bullet.express { border-radius: 0; transform: rotate(45deg); width: 24px; height: 24px; }
+  .bullet.express.large { width: 36px; height: 36px; }
+  .bullet.express .bullet-label { transform: rotate(-45deg); }
+  .bullet-placeholder {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: 2px solid #444;
+    flex-shrink: 0;
+  }
+
+  /* ---- Station columns ---- */
+  .stations {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+  .station .sign {
+    min-height: 270px;
+    display: flex;
+    flex-direction: column;
+  }
+  .sign-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #333;
+  }
+  .sign-titles { min-width: 0; }
+  .sign-station {
+    font-size: 21px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sign-direction {
+    margin-top: 3px;
+    font-size: 14px;
+    color: #b5b5b5;
+  }
+
+  /* ---- Departure board inside each sign ---- */
+  .board {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+  }
+  .board-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 11px 0;
+  }
+  .board-row + .board-row { border-top: 1px solid #262626; }
+  .board-minutes { font-size: 26px; font-weight: 700; }
+  .board-row:first-child .board-minutes { font-size: 44px; }
+  .board-unit {
+    margin-left: 5px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #b5b5b5;
+  }
+  .board-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 14px;
+  }
+  .board-time { color: #b5b5b5; font-variant-numeric: tabular-nums; }
+  .tag {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .tag-live { color: #6CBE45; }
+  .tag-scheduled { color: #777; }
+  .board-empty {
+    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #0b1220;
-    color: #e6edf3;
-    padding: 24px 16px;
+    padding: 24px 8px;
+    color: #8a8a8a;
+    font-size: 15px;
+    text-align: center;
   }
-  .card {
-    background: #131b2b;
-    border: 1px solid #223049;
-    border-radius: 12px;
-    padding: 28px;
+
+  /* ---- Controls under each sign ---- */
+  .controls { padding-top: 6px; }
+  .controls-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  label {
+    display: block;
+    margin: 12px 0 5px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #111;
+  }
+  select, input {
     width: 100%;
-    max-width: 420px;
+    padding: 9px 10px;
+    border: 2px solid #000;
+    border-radius: 0;
+    background: #fff;
+    color: #000;
+    font: inherit;
+    font-size: 15px;
   }
-  h1 { font-size: 1.3rem; margin: 0 0 2px; }
-  p.sub { color: #8b96a8; margin: 0 0 22px; font-size: 0.85rem; }
-  label { display: block; font-size: 0.8rem; color: #a7b2c4; margin: 16px 0 6px; }
-  select, button {
-    width: 100%;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid #2a3852;
-    background: #0e1626;
-    color: #e6edf3;
-    font-size: 0.95rem;
-  }
-  select:disabled { opacity: 0.5; }
-  button {
-    margin-top: 22px;
-    background: #3b82f6;
-    border: none;
-    font-weight: 600;
+  select:disabled { opacity: 0.4; }
+
+  /* ---- Buttons ---- */
+  .btn {
+    padding: 11px 20px;
+    border: 2px solid #000;
+    border-radius: 0;
+    background: #000;
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
     cursor: pointer;
   }
-  button:disabled { background: #2a3852; cursor: not-allowed; }
-  .departures {
-    margin-top: 12px;
-    border-radius: 8px;
-    background: #0e1626;
-    border: 1px solid #223049;
-    overflow: hidden;
-  }
-  .departures .empty {
-    padding: 18px;
-    text-align: center;
-    color: #8b96a8;
-    font-size: 0.85rem;
-  }
-  .departure-row {
+  .btn-secondary { background: #fff; color: #000; }
+  .btn-small { padding: 6px 12px; font-size: 13px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .clear-slot { margin-top: 10px; }
+
+  .actions {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 12px 18px;
-  }
-  .departure-row + .departure-row {
-    border-top: 1px solid #223049;
-  }
-  .departure-row .minutes {
-    font-weight: 700;
-    font-size: 1.1rem;
-  }
-  .departure-row .left {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .live-badge {
-    display: inline-flex;
     align-items: center;
-    gap: 4px;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: #34d399;
-    text-transform: uppercase;
+    gap: 16px;
+    margin-top: 28px;
   }
-  .live-badge::before {
-    content: "";
-    width: 6px;
-    height: 6px;
+  .status { font-size: 14px; color: #555; }
+  .error { color: #EE352E; font-size: 14px; font-weight: 700; }
+
+  /* ---- Footer: device pairing + sign out ---- */
+  .footer {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 44px;
+    padding-top: 20px;
+    border-top: 2px solid #000;
+  }
+  .footer h2 { margin: 0 0 8px; font-size: 15px; font-weight: 700; }
+  .device-paired {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 15px;
+  }
+  .dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 7px;
     border-radius: 50%;
-    background: #34d399;
+    background: #00933C;
   }
-  .scheduled-badge {
-    font-size: 0.65rem;
-    color: #5b6577;
+  .pair-row { display: flex; gap: 8px; }
+  .pair-row input {
+    width: 190px;
+    font-family: ui-monospace, Menlo, monospace;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
   }
-  /* Soonest departure (first row) reads like the headline number on a real
-     platform countdown clock; the rest are supporting detail below it. */
-  .departure-row:first-child {
-    padding: 16px 18px;
-  }
-  .departure-row:first-child .minutes {
-    font-size: 1.9rem;
-    color: #3b82f6;
-  }
-  .departure-row .time {
-    color: #8b96a8;
-    font-size: 0.8rem;
-  }
-  .error {
-    color: #f87171;
-    font-size: 0.82rem;
-    margin-top: 14px;
-    line-height: 1.4;
-  }
-  .auth-bar {
-    margin-bottom: 20px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #223049;
-  }
-  .auth-bar .signed-in {
+
+  /* ---- Sign-in / checking views: full-height black screen ---- */
+  .screen-dark {
+    min-height: 100vh;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;
   }
-  .auth-bar .who {
-    font-size: 0.85rem;
-    color: #a7b2c4;
-  }
-  .auth-bar .sign-out {
-    width: auto;
-    margin-top: 0;
-    padding: 6px 12px;
-    font-size: 0.8rem;
-    background: #1c2740;
-  }
-  .device-status {
-    margin-top: 12px;
-  }
-  .device-status .paired {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    font-size: 0.8rem;
-    color: #34d399;
-  }
-  .device-status .unlink-device {
-    width: auto;
-    margin-top: 0;
-    padding: 6px 12px;
-    font-size: 0.8rem;
-    background: #1c2740;
-  }
-  .device-status .pair-form label {
-    margin: 0 0 6px;
-  }
-  .device-status .pair-row {
-    display: flex;
-    gap: 8px;
-  }
-  .device-status .pair-row input {
+  .screen-dark .masthead { border-bottom: 1px solid #1f1f1f; }
+  .centered {
     flex: 1;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid #2a3852;
-    background: #0e1626;
-    color: #e6edf3;
-    font-size: 0.95rem;
-    font-family: ui-monospace, monospace;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px 12vh;
   }
-  .device-status .pair-row button {
-    width: auto;
-    margin-top: 0;
-    padding: 10px 14px;
-    font-size: 0.85rem;
-    white-space: nowrap;
+  /* The sign motif without the box: a white rule above the heading */
+  .signin-panel {
+    position: relative;
+    width: 100%;
+    max-width: 360px;
+    padding-top: 26px;
   }
-  .my-stations h2 {
-    font-size: 0.95rem;
-    margin: 0 0 2px;
+  .signin-panel::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: #fff;
   }
-  .my-stations .sub {
-    margin: 0 0 16px;
-  }
-  .station-slot {
-    margin-bottom: 16px;
-  }
-  .slot {
-    padding: 12px;
-    border: 1px solid #223049;
-    border-radius: 8px;
-    background: #0e1626;
-  }
-  .slot-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #a7b2c4;
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .slot select {
-    margin-bottom: 8px;
-  }
-  .slot select:last-of-type {
-    margin-bottom: 0;
-  }
-  .clear-slot {
-    width: auto;
-    margin-top: 8px;
-    padding: 5px 10px;
-    font-size: 0.75rem;
-    background: #1c2740;
+  .signin-panel h2 { margin: 0 0 8px; font-size: 34px; font-weight: 500; letter-spacing: -0.01em; }
+  .signin-panel p { margin: 0 0 28px; color: #b5b5b5; font-size: 16px; line-height: 1.4; }
+  .signin-panel .error { margin-top: 16px; }
+
+  /* ---- Boot fallback (written by the plain-JS script below) ---- */
+  .card {
+    max-width: 440px;
+    margin: 72px auto;
+    padding: 24px;
+    background: #000;
+    color: #fff;
   }
   .boot-status {
-    color: #8b96a8;
-    font-size: 0.85rem;
+    color: #8a8a8a;
+    font-size: 15px;
     text-align: center;
+    padding: 72px 16px;
   }
+  .card .boot-status,
+  .centered .boot-status { padding: 0; }
+
+  /* ---- Site footer, shown on every screen ---- */
+  .site-footer {
+    padding: 20px 16px 28px;
+    text-align: center;
+    font-size: 13px;
+  }
+  .site-footer a {
+    color: inherit;
+    opacity: 0.6;
+    text-decoration: none;
+    border-bottom: 1px solid currentColor;
+  }
+  .site-footer a:hover { opacity: 1; }
   .boot-status.boot-error {
-    color: #f87171;
+    color: #EE352E;
     text-align: left;
     white-space: pre-wrap;
-    font-family: ui-monospace, monospace;
-    font-size: 0.75rem;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 13px;
+  }
+
+  @media (max-width: 900px) {
+    .stations { grid-template-columns: 1fr; }
+    .page { padding: 20px 16px; }
+    .masthead { padding: 26px 16px 18px; }
   }
 </style>
 </head>
 <body>
 <!-- Placeholder content, replaced once React actually mounts. If this is
-     still on screen - not the real UI, not an error box - with no red text
-     below, React never took over at all: check the browser console (F12)
-     for a CDN/network error the boot script below wasn't able to catch. -->
+     still on screen with no red text below, React never took over at all:
+     check the browser console (F12) for a CDN/network error the boot script
+     below wasn't able to catch. -->
 <div id="root"><div class="boot-status">Loading TransitTicker...</div></div>
 
 <!-- Runs before anything else, and is plain JS (not type="text/babel") on
      purpose: if Babel itself fails to load below, no text/babel script ever
-     runs - including any error handling written inside one. This is what
-     turns a silent blank page into a visible, specific error message when a
-     CDN script fails, and a generic "still not loaded" message after a
-     timeout for failure modes this doesn't catch directly. -->
+     runs - including any error handling written inside one. This turns a
+     silent blank page into a visible, specific error message when a CDN
+     script fails, and a generic "still not loaded" message after a timeout
+     for failure modes this doesn't catch directly. -->
 <script>
 (function () {
   function showBootError(message) {
@@ -283,9 +391,8 @@
 })();
 </script>
 
-<!-- Simple, no-build-step React setup: UMD builds + in-browser JSX transform.
-     Fine for a small internal simulator UI; a real app would use a proper
-     bundler, but that's unnecessary complexity here.
+<!-- No-build-step React setup: UMD builds + in-browser JSX transform.
+     Fine for a small simulator UI.
 
      @babel/standalone is pinned to an exact version (7.29.0, the last Babel 7
      release - https://babeljs.io/blog/2026/01/31/7.29.0). An unversioned
@@ -300,15 +407,14 @@
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
 
 <!-- Google Identity Services: renders the "Sign in with Google" button and
-     hands back a signed ID token directly in the browser - no OAuth
-     redirect/callback dance needed, since this app only needs to know who
-     signed in, not to call a Google API on their behalf. Loads async, so
-     the React code below polls briefly for window.google rather than
-     assuming it's ready by the time it runs. -->
+     hands back a signed ID token directly in the browser. This app only
+     needs to know who signed in, not to call a Google API on their behalf,
+     so no OAuth redirect flow is involved. Loads async, so the React code
+     below polls briefly for window.google until it's ready. -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 
-<!-- Injected by the Flask server at runtime from the BACKEND_API_URL env var,
-     so this image doesn't need to be rebuilt to point at a different backend. -->
+<!-- Injected by the Flask server at runtime from env vars, so this image
+     doesn't need to be rebuilt to point at a different backend. -->
 <script src="/config.js"></script>
 
 <script type="text/babel" data-presets="react">
@@ -317,15 +423,92 @@ const { useState, useEffect, useCallback, useRef } = React;
 const BACKEND_URL = window.BACKEND_API_URL || "http://localhost:5000";
 
 const DIRECTIONS = [
-  { value: 0, label: "Uptown (0)" },
-  { value: 1, label: "Downtown (1)" },
+  { value: 0, label: "Uptown" },
+  { value: 1, label: "Downtown" },
 ];
 
-// One saved-station slot: its own route/stop/direction pickers, reusing
-// the same /routes/<id>/stops lookup. Kept as a separate component (rather
-// than inlined 3 times in App) so each slot's own "stops for this route"
-// fetch and loading state stay isolated from the other two slots.
-function StationPicker({ label, routes, value, onChange }) {
+// Official MTA route colors, used for the circular route symbols.
+const ROUTE_COLORS = {
+  "1": "#EE352E", "2": "#EE352E", "3": "#EE352E",
+  "4": "#00933C", "5": "#00933C", "6": "#00933C",
+  "7": "#B933AD",
+  A: "#0039A6", C: "#0039A6", E: "#0039A6",
+  B: "#FF6319", D: "#FF6319", F: "#FF6319", M: "#FF6319",
+  G: "#6CBE45",
+  J: "#996633", Z: "#996633",
+  L: "#A7A9AC",
+  N: "#FCCC0A", Q: "#FCCC0A", R: "#FCCC0A", W: "#FCCC0A",
+  GS: "#808183", FS: "#808183", H: "#808183", S: "#808183",
+  SI: "#0039A6", SIR: "#0039A6",
+};
+// Yellow-line symbols carry black type on MTA signage; all others white.
+const DARK_TEXT_ROUTES = new Set(["N", "Q", "R", "W"]);
+// GTFS route_ids that display as a different letter on signage (the
+// three shuttles all show "S").
+const ROUTE_LABELS = { GS: "S", FS: "S", H: "S", SI: "SIR" };
+
+function RouteBullet({ route, large }) {
+  if (!route) return null;
+  const id = String(route).toUpperCase();
+  // Express variants (e.g. "6X", "7X") share their base route's color and
+  // render as a diamond.
+  const express = id.length > 1 && id.endsWith("X") && Boolean(ROUTE_COLORS[id.slice(0, -1)]);
+  const base = express ? id.slice(0, -1) : id;
+  const label = ROUTE_LABELS[base] || base;
+  const style = {
+    background: ROUTE_COLORS[base] || "#333",
+    color: DARK_TEXT_ROUTES.has(base) ? "#000" : "#fff",
+  };
+  const className = [
+    "bullet",
+    express ? "express" : "",
+    large ? "large" : "",
+    label.length > 1 ? "long" : "",
+  ].join(" ");
+  return (
+    <span className={className} style={style} aria-label={`${label} train`}>
+      <span className="bullet-label">{label}</span>
+    </span>
+  );
+}
+
+// The departure list shown inside a station's sign panel.
+function DeparturesBoard({ departures, configured }) {
+  if (!departures) {
+    return (
+      <div className="board-empty">
+        {configured ? "Save to see live departures" : "Choose a route and stop below"}
+      </div>
+    );
+  }
+  if (departures.length === 0) {
+    return <div className="board-empty">No upcoming departures</div>;
+  }
+  return (
+    <ol className="board">
+      {departures.map((d, i) => (
+        <li className="board-row" key={i}>
+          <span className="board-minutes">
+            {d.minutes_away}
+            <span className="board-unit">min</span>
+          </span>
+          <span className="board-meta">
+            <span className={d.is_realtime ? "tag tag-live" : "tag tag-scheduled"}>
+              {d.is_realtime ? "Live" : "Scheduled"}
+            </span>
+            <span className="board-time">{d.departure_time.slice(0, 5)}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// One of the three saved stations: a sign panel showing the station and
+// its live departures, with that slot's own route/stop/direction pickers
+// beneath it. Each column owns its own "stops for this route" fetch so the
+// three slots load independently.
+function StationColumn({ index, routes, value, onChange, preview }) {
   const [stops, setStops] = useState([]);
   const [loadingStops, setLoadingStops] = useState(false);
 
@@ -349,72 +532,98 @@ function StationPicker({ label, routes, value, onChange }) {
       .finally(() => setLoadingStops(false));
   }, [route]);
 
+  const stopName = (stops.find((s) => s.stop_id === stop) || {}).stop_name;
+  const directionLabel = (DIRECTIONS.find((d) => d.value === direction) || {}).label;
+  const configured = Boolean(route && stop);
+
+  let title = `Station ${index + 1}`;
+  if (stopName) title = stopName;
+  else if (route) title = "Choose a stop";
+
   return (
-    <div className="slot">
-      <div className="slot-label">{label}</div>
-      <select
-        value={route}
-        onChange={(e) => {
-          const newRoute = e.target.value;
-          if (!newRoute) {
-            onChange(null);
-          } else {
-            onChange({ route: newRoute, stop: "", direction: 1 });
-          }
-        }}
-      >
-        <option value="">Select a route</option>
-        {routes.map((r) => (
-          <option key={r} value={r}>{r}</option>
-        ))}
-      </select>
-      <select
-        value={stop}
-        onChange={(e) => onChange({ route, stop: e.target.value, direction })}
-        disabled={!route || loadingStops}
-      >
-        <option value="">{loadingStops ? "Loading stops..." : "Select a stop"}</option>
-        {stops.map((s) => (
-          <option key={s.stop_id} value={s.stop_id}>{s.stop_name}</option>
-        ))}
-      </select>
-      <select
-        value={direction}
-        onChange={(e) => onChange({ route, stop, direction: Number(e.target.value) })}
-      >
-        {DIRECTIONS.map((d) => (
-          <option key={d.value} value={d.value}>{d.label}</option>
-        ))}
-      </select>
-      {value && (
-        <button className="clear-slot" onClick={() => onChange(null)}>Clear</button>
-      )}
-    </div>
+    <section className="station">
+      <div className="sign">
+        <div className="sign-head">
+          {route ? <RouteBullet route={route} large /> : <span className="bullet-placeholder" />}
+          <div className="sign-titles">
+            <div className="sign-station" title={title}>{title}</div>
+            <div className="sign-direction">{configured ? directionLabel : "Not set"}</div>
+          </div>
+        </div>
+        <DeparturesBoard departures={preview} configured={configured} />
+      </div>
+
+      <div className="controls">
+        <div className="controls-row">
+          <div>
+            <label htmlFor={`route-${index}`}>Route</label>
+            <select
+              id={`route-${index}`}
+              value={route}
+              onChange={(e) => {
+                const newRoute = e.target.value;
+                onChange(newRoute ? { route: newRoute, stop: "", direction: 1 } : null);
+              }}
+            >
+              <option value="">Select</option>
+              {routes.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor={`direction-${index}`}>Direction</label>
+            <select
+              id={`direction-${index}`}
+              value={direction}
+              onChange={(e) => onChange({ route, stop, direction: Number(e.target.value) })}
+              disabled={!route}
+            >
+              {DIRECTIONS.map((d) => (
+                <option key={d.value} value={d.value}>{d.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <label htmlFor={`stop-${index}`}>Stop</label>
+        <select
+          id={`stop-${index}`}
+          value={stop}
+          onChange={(e) => onChange({ route, stop: e.target.value, direction })}
+          disabled={!route || loadingStops}
+        >
+          <option value="">{loadingStops ? "Loading stops..." : "Select a stop"}</option>
+          {stops.map((s) => (
+            <option key={s.stop_id} value={s.stop_id}>{s.stop_name}</option>
+          ))}
+        </select>
+        {value && (
+          <button className="btn btn-secondary btn-small clear-slot" onClick={() => onChange(null)}>
+            Clear
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
-// Renders a list of departures exactly like a small platform countdown
-// clock would - reused for every saved station's live preview.
-function DeparturesBoard({ departures }) {
+function Masthead() {
   return (
-    <div className="departures">
-      {departures && departures.length > 0 ? (
-        departures.map((d, i) => (
-          <div className="departure-row" key={i}>
-            <span className="left">
-              <span className="minutes">{d.minutes_away} min</span>
-              {d.is_realtime ? (
-                <span className="live-badge">Live</span>
-              ) : (
-                <span className="scheduled-badge">Scheduled</span>
-              )}
-            </span>
-            <span className="time">{d.departure_time}</span>
-          </div>
-        ))
-      ) : (
-        <div className="empty">No upcoming departures found for this station.</div>
-      )}
+    <header className="sign masthead">
+      <div className="masthead-inner">
+        <h1>TransitTicker</h1>
+        <p>Departure board simulator</p>
+      </div>
+    </header>
+  );
+}
+
+function SiteFooter() {
+  return (
+    <div className="site-footer">
+      <a href="https://github.com/moldham713/TransitTicker" target="_blank" rel="noopener noreferrer">
+        TransitTicker on GitHub
+      </a>
     </div>
   );
 }
@@ -428,9 +637,8 @@ function App() {
 
   // On mount, see if a session cookie from a previous visit is still valid
   // (credentials: "include" is required for the browser to send it at all
-  // on a cross-origin request). Nothing else in the app - the route list,
-  // saved stations, anything - loads before this resolves: signing in is a
-  // hard prerequisite for the rest of the page, not an optional step.
+  // on a cross-origin request). Nothing else in the app loads before this
+  // resolves: signing in is a hard prerequisite for the rest of the page.
   useEffect(() => {
     fetch(`${BACKEND_URL}/auth/me`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : null))
@@ -459,8 +667,8 @@ function App() {
 
   // Renders Google's own Sign In button once its script has finished
   // loading (it's marked async, so window.google may not exist yet the
-  // first time this runs - this polls briefly rather than assuming it is)
-  // and only while there's no active session to show it for.
+  // first time this runs, hence the brief polling), and only while there's
+  // no active session to show it for.
   useEffect(() => {
     if (!authChecked || user || !googleButtonRef.current) return;
     if (!window.GOOGLE_CLIENT_ID) {
@@ -477,9 +685,10 @@ function App() {
           callback: handleGoogleCredential,
         });
         window.google.accounts.id.renderButton(googleButtonRef.current, {
-          theme: "filled_blue",
+          theme: "outline",
           size: "large",
-          width: 320,
+          shape: "rectangular",
+          width: 300,
         });
       } else {
         setTimeout(tryInit, 100);
@@ -491,6 +700,11 @@ function App() {
   }, [authChecked, user, handleGoogleCredential]);
 
   const signOut = useCallback(() => {
+    // Stops Google from silently re-selecting this account on the next
+    // visit, so signing out actually lands on the sign-in screen.
+    if (window.google && window.google.accounts && window.google.accounts.id) {
+      window.google.accounts.id.disableAutoSelect();
+    }
     fetch(`${BACKEND_URL}/auth/logout`, { method: "POST", credentials: "include" })
       .finally(() => setUser(null));
   }, []);
@@ -536,10 +750,7 @@ function App() {
       .finally(() => setUnlinkingDevice(false));
   }, []);
 
-  // Route list for the station pickers - only fetched once signed in,
-  // never before. This is what used to fire unconditionally on page load;
-  // gating it on `user` is what actually enforces "sign in is step one"
-  // for the whole page, not just for saving.
+  // Route list for the station pickers - only fetched once signed in.
   const [routes, setRoutes] = useState([]);
 
   useEffect(() => {
@@ -556,17 +767,16 @@ function App() {
       .catch((err) => setError(`Could not load routes from ${BACKEND_URL}: ${err.message}`));
   }, [user]);
 
-  // Always exactly 3 UI slots, some possibly empty (null) - the backend
-  // only ever stores the compact list of filled ones (see savePreferences
-  // below), so this pads/truncates whatever comes back from login or
-  // /auth/me into fixed slot positions for the 3 pickers to bind to.
+  // Always exactly 3 UI slots, some possibly empty (null). The backend
+  // stores only the compact list of filled ones (see savePreferences), so
+  // this pads whatever comes back from login or /auth/me into fixed slot
+  // positions for the three columns to bind to.
   const [preferences, setPreferences] = useState([null, null, null]);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [preferencesSaved, setPreferencesSaved] = useState(false);
   // One departures preview per slot, populated only after that slot has
-  // actually been saved - see savePreferences. Stays null for an edited-
-  // but-not-yet-saved slot, so a preview never shows stale data standing
-  // in for a change that hasn't been persisted yet.
+  // actually been saved. Stays null for an edited-but-unsaved slot, so a
+  // preview only ever reflects a selection that's been persisted.
   const [previews, setPreviews] = useState([null, null, null]);
 
   useEffect(() => {
@@ -592,10 +802,9 @@ function App() {
 
   const DEPARTURE_COUNT = 3; // matches a small embedded display's line count
 
-  // Fetches a live preview for one saved slot, via the same public /
-  // endpoint the backend (and eventually a paired device) itself reads
-  // from - this is the "simulate the backend behavior" step, and
-  // deliberately doesn't require a device to be paired to see it.
+  // Fetches a live preview for one saved slot via the public / endpoint,
+  // which runs the same lookup a paired device gets - this is the
+  // "simulate the backend" step, and needs no paired device to work.
   const fetchPreview = useCallback((index, pref) => {
     const params = new URLSearchParams({
       route: pref.route,
@@ -624,9 +833,8 @@ function App() {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      // Nulls (empty slots) are dropped rather than sent - the backend's
-      // stored list is just "the stations you've set", not 3 fixed
-      // positions with gaps.
+      // Empty slots are dropped before sending: the backend's stored list
+      // is just "the stations you've set", with no gaps.
       body: JSON.stringify({ preferences: preferences.filter(Boolean) }),
     })
       .then((res) => {
@@ -646,10 +854,9 @@ function App() {
 
   // Keeps every currently-shown preview live, re-fetching on the same
   // 30-second cadence the backend's own real-time data refreshes on (see
-  // Backend/src/app.py) - polling more often than that would just repeat
-  // the same server-side data. Only refreshes slots that already have a
-  // preview showing (i.e. have actually been saved), never a slot mid-edit
-  // with no preview yet - same rule fetchPreview's callers already follow.
+  // Backend/src/app.py); polling faster would only repeat the same
+  // server-side data. Only slots that already have a preview showing
+  // (i.e. have been saved) are refreshed.
   useEffect(() => {
     const interval = setInterval(() => {
       preferences.forEach((pref, i) => {
@@ -659,87 +866,95 @@ function App() {
     return () => clearInterval(interval);
   }, [preferences, previews, fetchPreview]);
 
+  // Each view below has its own `key` on <main>. Google's script injects
+  // the sign-in button's iframe into the googleButtonRef div outside of
+  // React's knowledge; a distinct key makes React discard that whole
+  // subtree on sign-in, so the injected button goes with it.
   if (!authChecked) {
     return (
-      <div className="card">
-        <h1>TransitTicker</h1>
-        <p className="sub boot-status">Checking sign-in status...</p>
+      <div className="screen-dark">
+        <Masthead />
+        <main key="checking" className="centered">
+          <div className="boot-status">Checking sign-in status...</div>
+        </main>
+        <SiteFooter />
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="card">
-        <h1>TransitTicker</h1>
-        <p className="sub">Sign in to set the stations your ticker tracks.</p>
-        <div ref={googleButtonRef}></div>
-        {error && <div className="error">{error}</div>}
+      <div className="screen-dark">
+        <Masthead />
+        <main key="signed-out" className="centered">
+          <div className="signin-panel">
+            <h2>Sign in</h2>
+            <p>Choose the stations your ticker shows.</p>
+            <div ref={googleButtonRef}></div>
+            {error && <div className="error">{error}</div>}
+          </div>
+        </main>
+        <SiteFooter />
       </div>
     );
   }
 
   return (
-    <div className="card">
-      <h1>TransitTicker</h1>
-      <p className="sub">Embedded display simulator</p>
-
-      <div className="auth-bar">
-        <div className="signed-in">
-          <span className="who">Signed in</span>
-          <button className="sign-out" onClick={signOut}>Sign out</button>
-        </div>
-        <div className="device-status">
-          {user.device_paired ? (
-            <div className="paired">
-              <span>Device paired</span>
-              <button className="unlink-device" onClick={unlinkDevice} disabled={unlinkingDevice}>
-                {unlinkingDevice ? "Unlinking..." : "Unlink device"}
-              </button>
-            </div>
-          ) : (
-            <div className="pair-form">
-              <label htmlFor="pairing-code-input">Pair a device</label>
-              <div className="pair-row">
-                <input
-                  id="pairing-code-input"
-                  value={pairingCodeInput}
-                  onChange={(e) => setPairingCodeInput(e.target.value.toUpperCase())}
-                  placeholder="Code from device screen"
-                  maxLength={6}
-                />
-                <button onClick={claimPairingCode} disabled={pairingDevice || !pairingCodeInput}>
-                  {pairingDevice ? "Pairing..." : "Pair"}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="my-stations">
-        <h2>My Stations</h2>
-        <p className="sub">
-          Pick up to 3 stations and save them - each one previews live below
-          once saved, the same data your paired device would show.
-        </p>
-        {[0, 1, 2].map((i) => (
-          <div className="station-slot" key={i}>
-            <StationPicker
-              label={`Station ${i + 1}`}
+    <div className="light">
+      <Masthead />
+      <main key="signed-in" className="page">
+        <div className="stations">
+          {[0, 1, 2].map((i) => (
+            <StationColumn
+              key={i}
+              index={i}
               routes={routes}
               value={preferences[i]}
               onChange={(v) => updateSlot(i, v)}
+              preview={previews[i]}
             />
-            {previews[i] && <DeparturesBoard departures={previews[i]} />}
-          </div>
-        ))}
-        <button onClick={savePreferences} disabled={savingPreferences}>
-          {savingPreferences ? "Saving..." : preferencesSaved ? "Saved" : "Save My Stations"}
-        </button>
-      </div>
+          ))}
+        </div>
 
-      {error && <div className="error">{error}</div>}
+        <div className="actions">
+          <button className="btn" onClick={savePreferences} disabled={savingPreferences}>
+            {savingPreferences ? "Saving..." : "Save stations"}
+          </button>
+          {preferencesSaved && !error && (
+            <span className="status">Saved. Departures refresh every 30 seconds.</span>
+          )}
+          {error && <span className="error">{error}</span>}
+        </div>
+
+        <footer className="footer">
+          <div>
+            <h2>Device</h2>
+            {user.device_paired ? (
+              <div className="device-paired">
+                <span><span className="dot"></span>Paired</span>
+                <button className="btn btn-secondary btn-small" onClick={unlinkDevice} disabled={unlinkingDevice}>
+                  {unlinkingDevice ? "Unlinking..." : "Unlink"}
+                </button>
+              </div>
+            ) : (
+              <div className="pair-row">
+                <input
+                  aria-label="Pairing code"
+                  value={pairingCodeInput}
+                  onChange={(e) => setPairingCodeInput(e.target.value.toUpperCase())}
+                  placeholder="Code on device"
+                  maxLength={6}
+                />
+                <button className="btn" onClick={claimPairingCode} disabled={pairingDevice || !pairingCodeInput}>
+                  {pairingDevice ? "Pairing..." : "Pair"}
+                </button>
+              </div>
+            )}
+          </div>
+          <button className="btn btn-secondary" onClick={signOut}>Sign out</button>
+        </footer>
+      </main>
+      <SiteFooter />
     </div>
   );
 }
